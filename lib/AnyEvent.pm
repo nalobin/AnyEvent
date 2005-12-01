@@ -54,7 +54,7 @@ no warnings;
 use strict 'vars';
 use Carp;
 
-our $VERSION = 0.1;
+our $VERSION = 0.2;
 our $MODEL;
 
 our $AUTOLOAD;
@@ -67,17 +67,20 @@ my @models = (
       [Tk    => Tk::],
 );
 
+our %method = map +($_ => 1), qw(io timer condvar broadcast wait cancel DESTROY);
+
 sub AUTOLOAD {
    $AUTOLOAD =~ s/.*://;
+
+   $method{$AUTOLOAD}
+      or croak "$AUTOLOAD: not a valid method for AnyEvent objects";
 
    unless ($MODEL) {
       # check for already loaded models
       for (@models) {
          my ($model, $package) = @$_;
          if (scalar keys %{ *{"$package\::"} }) {
-            eval "require AnyEvent::Impl::$model"
-               or die;
-
+            eval "require AnyEvent::Impl::$model";
             last if $MODEL;
          }
       }
@@ -87,9 +90,7 @@ sub AUTOLOAD {
 
          for (@models) {
             my ($model, $package) = @$_;
-            eval "require AnyEvent::Impl::$model"
-               or die;
-
+            eval "require AnyEvent::Impl::$model";
             last if $MODEL;
          }
 
