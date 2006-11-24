@@ -1,5 +1,7 @@
 package AnyEvent::Impl::Tk;
 
+no warnings;
+
 use Tk ();
 
 my $mw = new MainWindow;
@@ -62,6 +64,10 @@ sub AnyEvent::Impl::Tk::CondVar::broadcast {
 
 sub AnyEvent::Impl::Tk::CondVar::wait {
    Tk::DoOneEvent (0) while !${$_[0]};
+}
+
+sub one_event {
+   Tk::DoOneEvent (0);
 }
 
 1

@@ -1,5 +1,7 @@
 package AnyEvent::Impl::Glib;
 
+no warnings;
+
 use Glib ();
 
 my $maincontext = Glib::MainContext->default;
@@ -57,6 +59,10 @@ sub broadcast {
 
 sub wait {
    $maincontext->iteration (1) while !${$_[0]};
+}
+
+sub one_event {
+   $maincontext->iteration (1);
 }
 
 1

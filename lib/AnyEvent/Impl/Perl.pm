@@ -1,5 +1,7 @@
 package AnyEvent::Impl::Perl;
 
+no warnings;
+
 use Time::HiRes qw(time);
 use Scalar::Util ();
 
@@ -44,7 +46,7 @@ sub fds_chk($$) {
 }
 
 # the pure perl mainloop
-sub iteration {
+sub one_event {
    # 1. sort timers if required (slow)
    if ($need_sort) {
       undef $need_sort;
@@ -118,8 +120,9 @@ sub broadcast {
 }
 
 sub wait {
-   iteration while !${$_[0]};
+   one_event while !${$_[0]};
 }
+
 
 1
 
