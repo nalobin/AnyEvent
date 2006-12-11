@@ -91,9 +91,9 @@ Example:
       undef $w;
    });
 
-=head2 TIMER WATCHERS
+=head2 TIME WATCHERS
 
-You can create a timer watcher by calling the C<< AnyEvent->timer >>
+You can create a time watcher by calling the C<< AnyEvent->timer >>
 method with the following mandatory arguments:
 
 C<after> after how many seconds (fractions are supported) should the timer
@@ -159,6 +159,30 @@ Example:
 
 =back
 
+=head2 SIGNAL WATCHERS
+
+You can listen for signals using a signal watcher, C<signal> is the signal
+I<name> without any C<SIG> prefix. Multiple signals events can be clumped
+together into one callback invocation, and callbakc invocation might or
+might not be asynchronous.
+
+These watchers might use C<%SIG>, so programs overwriting those signals
+directly will likely not work correctly.
+
+Example: exit on SIGINT
+
+   my $w = AnyEvent->signal (signal => "INT", cb => sub { exit 1 });
+
+=head2 CHILD PROCESS WATCHERS
+
+You can also listen for the status of a child process specified by the
+C<pid> argument. The watcher will only trigger once. This works by
+installing a signal handler for C<SIGCHLD>.
+
+Example: wait for pid 1333
+
+  my $w = AnyEvent->child (pid => 1333, cb => sub { warn "exit status $?" });
+
 =head1 GLOBALS
 
 =over 4
@@ -178,6 +202,12 @@ The known classes so far are:
    AnyEvent::Impl::Glib      based on Glib, second-best choice.
    AnyEvent::Impl::Tk        based on Tk, very bad choice.
    AnyEvent::Impl::Perl      pure-perl implementation, inefficient.
+
+=item AnyEvent::detect
+
+Returns C<$AnyEvent::MODEL>, forcing autodetection of the event model if
+necessary. You should only call this function right before you would have
+created an AnyEvent watcher anyway, that is, very late at runtime.
 
 =back
 
@@ -216,10 +246,10 @@ generally better.
 package AnyEvent;
 
 no warnings;
-use strict 'vars';
+use strict;
 use Carp;
 
-our $VERSION = '2.1';
+our $VERSION = '2.5';
 our $MODEL;
 
 our $AUTOLOAD;
@@ -230,22 +260,19 @@ our $verbose = $ENV{PERL_ANYEVENT_VERBOSE}*1;
 our @REGISTRY;
 
 my @models = (
-      [Coro::Event::          => AnyEvent::Impl::Coro::],
-      [Event::                => AnyEvent::Impl::Event::],
-      [Glib::                 => AnyEvent::Impl::Glib::],
-      [Tk::                   => AnyEvent::Impl::Tk::],
-      [AnyEvent::Impl::Perl:: => AnyEvent::Impl::Perl::],
+   [Coro::Event::          => AnyEvent::Impl::Coro::],
+   [Event::                => AnyEvent::Impl::Event::],
+   [Glib::                 => AnyEvent::Impl::Glib::],
+   [Tk::                   => AnyEvent::Impl::Tk::],
+   [AnyEvent::Impl::Perl:: => AnyEvent::Impl::Perl::],
 );
 
-our %method = map +($_ => 1), qw(io timer condvar broadcast wait DESTROY);
+our %method = map +($_ => 1), qw(io timer condvar broadcast wait signal one_event DESTROY);
 
-sub AUTOLOAD {
-   $AUTOLOAD =~ s/.*://;
-
-   $method{$AUTOLOAD}
-      or croak "$AUTOLOAD: not a valid method for AnyEvent objects";
-
+sub detect() {
    unless ($MODEL) {
+      no strict 'refs';
+
       # check for already loaded models
       for (@REGISTRY, @models) {
          my ($package, $model) = @$_;
@@ -271,14 +298,111 @@ sub AUTOLOAD {
          }
 
          $MODEL
-           or die "No event module selected for AnyEvent and autodetect failed. Install any one of these modules: Coro, Event, Glib or Tk.";
+           or die "No event module selected for AnyEvent and autodetect failed. Install any one of these modules: Event (or Coro+Event), Glib or Tk.";
       }
+
+      unshift @ISA, $MODEL;
+      push @{"$MODEL\::ISA"}, "AnyEvent::Base";
    }
 
-   @ISA = $MODEL;
+   $MODEL
+}
+
+sub AUTOLOAD {
+   (my $func = $AUTOLOAD) =~ s/.*://;
+
+   $method{$func}
+      or croak "$func: not a valid method for AnyEvent objects";
+
+   detect unless $MODEL;
 
    my $class = shift;
-   $class->$AUTOLOAD (@_);
+   $class->$func (@_);
+}
+
+package AnyEvent::Base;
+
+# default implementation for ->condvar, ->wait, ->broadcast
+
+sub condvar {
+   bless \my $flag, "AnyEvent::Base::CondVar"
+}
+
+sub AnyEvent::Base::CondVar::broadcast {
+   ${$_[0]}++;
+}
+
+sub AnyEvent::Base::CondVar::wait {
+   AnyEvent->one_event while !${$_[0]};
+}
+
+# default implementation for ->signal
+
+our %SIG_CB;
+
+sub signal {
+   my (undef, %arg) = @_;
+
+   my $signal = uc $arg{signal}
+      or Carp::croak "required option 'signal' is missing";
+
+   $SIG_CB{$signal}{$arg{cb}} = $arg{cb};
+   $SIG{$signal} ||= sub {
+      $_->() for values %{ $SIG_CB{$signal} || {} };
+   };
+
+   bless [$signal, $arg{cb}], "AnyEvent::Base::Signal"
+}
+
+sub AnyEvent::Base::Signal::DESTROY {
+   my ($signal, $cb) = @{$_[0]};
+
+   delete $SIG_CB{$signal}{$cb};
+
+   $SIG{$signal} = 'DEFAULT' unless keys %{ $SIG_CB{$signal} };
+}
+
+# default implementation for ->child
+
+our %PID_CB;
+our $CHLD_W;
+our $PID_IDLE;
+our $WNOHANG;
+
+sub _child_wait {
+   while (0 < (my $pid = waitpid -1, $WNOHANG)) {
+      $_->() for values %{ (delete $PID_CB{$pid}) || {} };
+   }
+
+   undef $PID_IDLE;
+}
+
+sub child {
+   my (undef, %arg) = @_;
+
+   my $pid = uc $arg{pid}
+      or Carp::croak "required option 'pid' is missing";
+
+   $PID_CB{$pid}{$arg{cb}} = $arg{cb};
+
+   unless ($WNOHANG) {
+      $CHLD_W = AnyEvent->signal (signal => 'CHLD', cb => \&_child_wait);
+      $WNOHANG = eval { require POSIX; &POSIX::WNOHANG } || 1;
+   }
+
+   # child could be a zombie already
+   $PID_IDLE ||= AnyEvent->timer (after => 0, cb => \&_child_wait);
+
+   bless [$pid, $arg{cb}], "AnyEvent::Base::Child"
+}
+
+sub AnyEvent::Base::Child::DESTROY {
+   my ($pid, $cb) = @{$_[0]};
+
+   delete $PID_CB{$pid}{$cb};
+   delete $PID_CB{$pid} unless keys %{ $PID_CB{$pid} };
+
+   undef $CHLD_W unless keys %PID_CB;
 }
 
 =head1 SUPPLYING YOUR OWN EVENT MODEL INTERFACE
@@ -299,7 +423,7 @@ package/class when it finds the C<urxvt> package/module is loaded. When
 AnyEvent is loaded and asked to find a suitable event model, it will
 first check for the presence of urxvt.
 
-The class should prove implementations for all watcher types (see
+The class should provide implementations for all watcher types (see
 L<AnyEvent::Impl::Event> (source code), L<AnyEvent::Impl::Glib>
 (Source code) and so on for actual examples, use C<perldoc -m
 AnyEvent::Impl::Glib> to see the sources).
