@@ -163,7 +163,7 @@ Example:
 
 You can listen for signals using a signal watcher, C<signal> is the signal
 I<name> without any C<SIG> prefix. Multiple signals events can be clumped
-together into one callback invocation, and callbakc invocation might or
+together into one callback invocation, and callback invocation might or
 might not be asynchronous.
 
 These watchers might use C<%SIG>, so programs overwriting those signals
@@ -249,7 +249,7 @@ no warnings;
 use strict;
 use Carp;
 
-our $VERSION = '2.51';
+our $VERSION = '2.52';
 our $MODEL;
 
 our $AUTOLOAD;
@@ -388,12 +388,14 @@ sub child {
    $PID_CB{$pid}{$arg{cb}} = $arg{cb};
 
    unless ($WNOHANG) {
-      $CHLD_W = AnyEvent->signal (signal => 'CHLD', cb => \&_child_wait);
       $WNOHANG = eval { require POSIX; &POSIX::WNOHANG } || 1;
    }
 
-   # child could be a zombie already
-   $PID_IDLE ||= AnyEvent->timer (after => 0, cb => \&_child_wait);
+   unless ($CHLD_W) {
+      $CHLD_W = AnyEvent->signal (signal => 'CHLD', cb => \&_child_wait);
+      # child could be a zombie already
+      $PID_IDLE ||= AnyEvent->timer (after => 0, cb => \&_child_wait);
+   }
 
    bless [$pid, $arg{cb}], "AnyEvent::Base::Child"
 }
