@@ -247,9 +247,10 @@ package AnyEvent;
 
 no warnings;
 use strict;
+
 use Carp;
 
-our $VERSION = '2.52';
+our $VERSION = '2.53';
 our $MODEL;
 
 our $AUTOLOAD;
@@ -441,7 +442,7 @@ I<rxvt-unicode> distribution.
 I<rxvt-unicode> also cheats a bit by not providing blocking access to
 condition variables: code blocking while waiting for a condition will
 C<die>. This still works with most modules/usages, and blocking calls must
-not be in an interactive appliation, so it makes sense.
+not be in an interactive application, so it makes sense.
 
 =head1 ENVIRONMENT VARIABLES
 

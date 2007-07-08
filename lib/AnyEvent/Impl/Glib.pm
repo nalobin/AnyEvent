@@ -1,6 +1,7 @@
 package AnyEvent::Impl::Glib;
 
 no warnings;
+use strict;
 
 use Glib ();
 
@@ -12,6 +13,7 @@ sub io {
    my $self = bless \%arg, $class;
    my $rcb = \$self->{cb};
 
+   my @cond;
    # some glibs need hup, others error with it, YMMV
    push @cond, "in",  "hup" if $self->{poll} eq "r";
    push @cond, "out", "hup" if $self->{poll} eq "w";
