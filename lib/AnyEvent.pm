@@ -176,8 +176,10 @@ Example: exit on SIGINT
 =head2 CHILD PROCESS WATCHERS
 
 You can also listen for the status of a child process specified by the
-C<pid> argument. The watcher will only trigger once. This works by
-installing a signal handler for C<SIGCHLD>.
+C<pid> argument (or any child if the pid argument is 0). The watcher will
+trigger as often as status change for the child are received. This works
+by installing a signal handler for C<SIGCHLD>. The callback will be called with
+the pid and exit status (as returned by waitpid).
 
 Example: wait for pid 1333
 
@@ -197,8 +199,9 @@ AnyEvent has been extended at runtime (e.g. in I<rxvt-unicode>).
 
 The known classes so far are:
 
-   AnyEvent::Impl::Coro      based on Coro::Event, best choise.
-   AnyEvent::Impl::Event     based on Event, also best choice :)
+   EV::AnyEvent              based on EV (an interface to libev, best choice)
+   AnyEvent::Impl::Coro      based on Coro::Event, second best choice.
+   AnyEvent::Impl::Event     based on Event, also second best choice :)
    AnyEvent::Impl::Glib      based on Glib, second-best choice.
    AnyEvent::Impl::Tk        based on Tk, very bad choice.
    AnyEvent::Impl::Perl      pure-perl implementation, inefficient.
@@ -250,7 +253,7 @@ use strict;
 
 use Carp;
 
-our $VERSION = '2.54';
+our $VERSION = '2.55';
 our $MODEL;
 
 our $AUTOLOAD;
@@ -262,6 +265,7 @@ our @REGISTRY;
 
 my @models = (
    [Coro::Event::          => AnyEvent::Impl::Coro::],
+   [EV::                   => EV::AnyEvent::],
    [Event::                => AnyEvent::Impl::Event::],
    [Glib::                 => AnyEvent::Impl::Glib::],
    [Tk::                   => AnyEvent::Impl::Tk::],
@@ -373,8 +377,9 @@ our $PID_IDLE;
 our $WNOHANG;
 
 sub _child_wait {
-   while (0 < (my $pid = waitpid -1, $WNOHANG)) {
-      $_->() for values %{ (delete $PID_CB{$pid}) || {} };
+   while (0 <= (my $pid = waitpid -1, $WNOHANG)) {
+      $_->($pid, $?) for (values %{ $PID_CB{$pid} || {} }),
+                         (values %{ $PID_CB{0}    || {} });
    }
 
    undef $PID_IDLE;
@@ -383,7 +388,7 @@ sub _child_wait {
 sub child {
    my (undef, %arg) = @_;
 
-   my $pid = uc $arg{pid}
+   defined (my $pid = $arg{pid} + 0)
       or Carp::croak "required option 'pid' is missing";
 
    $PID_CB{$pid}{$arg{cb}} = $arg{cb};
