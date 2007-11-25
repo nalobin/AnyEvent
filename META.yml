@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:                AnyEvent
-version:             2.7
+version:             2.8
 abstract:            ~
 license:             ~
 generated_by:        ExtUtils::MakeMaker version 6.32
