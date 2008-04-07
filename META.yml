@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:                AnyEvent
-version:             2.9
+version:             3.0
 abstract:            ~
 license:             ~
 author:              ~
