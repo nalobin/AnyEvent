@@ -2,7 +2,7 @@
 
 AnyEvent - provide framework for multiple event loops
 
-Event, Coro, Glib, Tk, Perl - various supported event loops
+EV, Event, Coro::EV, Coro::Event, Glib, Tk, Perl - various supported event loops
 
 =head1 SYNOPSIS
 
@@ -77,11 +77,11 @@ module.
 
 On the first call of any method, the module tries to detect the currently
 loaded event loop by probing wether any of the following modules is
-loaded: L<Coro::Event>, L<Event>, L<Glib>, L<Tk>. The first one found is
-used. If none is found, the module tries to load these modules in the
-order given. The first one that could be successfully loaded will be
-used. If still none could be found, AnyEvent will fall back to a pure-perl
-event loop, which is also not very efficient.
+loaded: L<Coro::EV>, L<Coro::Event>, L<EV>, L<Event>, L<Glib>, L<Tk>. The
+first one found is used. If none are found, the module tries to load these
+modules in the order given. The first one that could be successfully
+loaded will be used. If still none could be found, AnyEvent will fall back
+to a pure-perl event loop, which is also not very efficient.
 
 Because AnyEvent first checks for modules that are already loaded, loading
 an Event model explicitly before first using AnyEvent will likely make
@@ -119,10 +119,6 @@ C<fh> the Perl I<filehandle> (not filedescriptor) to watch for
 events. C<poll> must be a string that is either C<r> or C<w>, that creates
 a watcher waiting for "r"eadable or "w"ritable events. C<cb> the callback
 to invoke everytime the filehandle becomes ready.
-
-Only one io watcher per C<fh> and C<poll> combination is allowed (i.e. on
-a socket you can have one r + one w, not any more (limitation comes from
-Tk - if you are sure you are not using Tk this limitation is gone).
 
 Filehandles will be kept alive, so as long as the watcher exists, the
 filehandle exists, too.
@@ -181,15 +177,23 @@ The watcher has only two methods:
 Wait (blocking if necessary) until the C<< ->broadcast >> method has been
 called on c<$cv>, while servicing other watchers normally.
 
-Not all event models support a blocking wait - some die in that case, so
-if you are using this from a module, never require a blocking wait, but
-let the caller decide wether the call will block or not (for example,
-by coupling condition variables with some kind of request results and
-supporting callbacks so the caller knows that getting the result will not
-block, while still suppporting blockign waits if the caller so desires).
-
 You can only wait once on a condition - additional calls will return
 immediately.
+
+Not all event models support a blocking wait - some die in that case
+(programs might want to do that so they stay interactive), so I<if you
+are using this from a module, never require a blocking wait>, but let the
+caller decide wether the call will block or not (for example, by coupling
+condition variables with some kind of request results and supporting
+callbacks so the caller knows that getting the result will not block,
+while still suppporting blocking waits if the caller so desires).
+
+Another reason I<never> to C<< ->wait >> in a module is that you cannot
+sensibly have two C<< ->wait >>'s in parallel, as that would require
+multiple interpreters or coroutines/threads, none of which C<AnyEvent>
+can supply (the coroutine-aware backends C<Coro::EV> and C<Coro::Event>
+explicitly support concurrent C<< ->wait >>'s from different coroutines,
+however).
 
 =item $cv->broadcast
 
@@ -251,12 +255,12 @@ AnyEvent has been extended at runtime (e.g. in I<rxvt-unicode>).
 The known classes so far are:
 
    AnyEvent::Impl::CoroEV    based on Coro::EV, best choice.
-   AnyEvent::Impl::EV        based on EV (an interface to libev, also best choice).
    AnyEvent::Impl::CoroEvent based on Coro::Event, second best choice.
+   AnyEvent::Impl::EV        based on EV (an interface to libev, also best choice).
    AnyEvent::Impl::Event     based on Event, also second best choice :)
-   AnyEvent::Impl::Glib      based on Glib, second-best choice.
+   AnyEvent::Impl::Glib      based on Glib, third-best choice.
    AnyEvent::Impl::Tk        based on Tk, very bad choice.
-   AnyEvent::Impl::Perl      pure-perl implementation, inefficient.
+   AnyEvent::Impl::Perl      pure-perl implementation, inefficient but portable.
 
 =item AnyEvent::detect
 
@@ -305,7 +309,7 @@ use strict;
 
 use Carp;
 
-our $VERSION = '3.0';
+our $VERSION = '3.1';
 our $MODEL;
 
 our $AUTOLOAD;
@@ -317,8 +321,8 @@ our @REGISTRY;
 
 my @models = (
    [Coro::EV::             => AnyEvent::Impl::CoroEV::],
-   [EV::                   => AnyEvent::Impl::EV::],
    [Coro::Event::          => AnyEvent::Impl::CoroEvent::],
+   [EV::                   => AnyEvent::Impl::EV::],
    [Event::                => AnyEvent::Impl::Event::],
    [Glib::                 => AnyEvent::Impl::Glib::],
    [Tk::                   => AnyEvent::Impl::Tk::],
@@ -636,7 +640,7 @@ All of this enables the following usage styles:
 
    my $data = $fcp->client_get ($url);
 
-2. Blocking, but parallelizing:
+2. Blocking, but running in parallel:
 
    my @datas = map $_->result,
                   map $fcp->txn_client_get ($_),
@@ -645,9 +649,9 @@ All of this enables the following usage styles:
 Both blocking examples work without the module user having to know
 anything about events.
 
-3a. Event-based in a main program, using any support Event module:
+3a. Event-based in a main program, using any supported event module:
 
-   use Event;
+   use EV;
 
    $fcp->txn_client_get ($url)->cb (sub {
       my $txn = shift;
@@ -655,7 +659,7 @@ anything about events.
       ...
    });
 
-   Event::loop;
+   EV::loop;
 
 3b. The module user could use AnyEvent, too:
 
@@ -672,11 +676,14 @@ anything about events.
 
 =head1 SEE ALSO
 
-Event modules: L<Coro::Event>, L<Coro>, L<Event>, L<Glib::Event>, L<Glib>.
+Event modules: L<Coro::EV>, L<EV>, L<EV::Glib>, L<Glib::EV>,
+L<Coro::Event>, L<Event>, L<Glib::Event>, L<Glib>, L<Coro>, L<Tk>.
 
-Implementations: L<AnyEvent::Impl::Coro>, L<AnyEvent::Impl::Event>, L<AnyEvent::Impl::Glib>, L<AnyEvent::Impl::Tk>.
+Implementations: L<AnyEvent::Impl::CoroEV>, L<AnyEvent::Impl::EV>,
+L<AnyEvent::Impl::CoroEvent>, L<AnyEvent::Impl::Event>,
+L<AnyEvent::Impl::Glib>, L<AnyEvent::Impl::Tk>, L<AnyEvent::Impl::Perl>.
 
-Nontrivial usage example: L<Net::FCP>.
+Nontrivial usage examples: L<Net::FCP>, L<Net::XMPP2>.
 
 =head1
 
