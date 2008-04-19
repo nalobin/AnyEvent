@@ -18,7 +18,7 @@ Coro::Event before creating the first AnyEvent watcher.
 Unlike most other event models, Coro::Event models allow recursion in
 condvars (see L<AnyEvent>, C<< $condvar->wait >>), I<< as long as this is
 done from different coroutines AND C<Coro::unblock> is used to register
-callbacks >>. See L<AnyEvent::Coro::Event> for even less restrictions.
+callbacks >>. See L<AnyEvent::Coro::Event> for even fewer restrictions.
 
 See L<AnyEvent::Impl::Coro> and L<Coro::Event> for more details about Coro
 integration.
@@ -38,7 +38,7 @@ use Coro::Event ();
 
 =head1 SEE ALSO
 
-  L<AnyEvent>, L<AnyEvent::Impl::Coro>, L<Coro::Event>.
+L<AnyEvent>, L<AnyEvent::Impl::Coro>, L<Coro::Event>.
 
 =head1 AUTHOR
 
