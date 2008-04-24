@@ -2,7 +2,7 @@
 
 AnyEvent - provide framework for multiple event loops
 
-EV, Event, Coro::EV, Coro::Event, Glib, Tk, Perl - various supported event loops
+EV, Event, Coro::EV, Coro::Event, Glib, Tk, Perl, Event::Lib, Qt - various supported event loops
 
 =head1 SYNOPSIS
 
@@ -80,13 +80,14 @@ The interface itself is vaguely similar, but not identical to the L<Event>
 module.
 
 During the first call of any watcher-creation method, the module tries
-to detect the currently loaded event loop by probing whether one of the
-following modules is already loaded: L<Coro::EV>, L<Coro::Event>, L<EV>,
-L<Event>, L<Glib>, L<Tk>. The first one found is used. If none are found,
-the module tries to load these modules in the stated order. The first one
-that can be successfully loaded will be used. If, after this, still none
-could be found, AnyEvent will fall back to a pure-perl event loop, which
-is not very efficient, but should work everywhere.
+to detect the currently loaded event loop by probing whether one of
+the following modules is already loaded: L<Coro::EV>, L<Coro::Event>,
+L<EV>, L<Event>, L<Glib>, L<Tk>, L<Event::Lib>, L<Qt>. The first one
+found is used. If none are found, the module tries to load these modules
+(excluding Event::Lib and Qt) in the order given. The first one that can
+be successfully loaded will be used. If, after this, still none could be
+found, AnyEvent will fall back to a pure-perl event loop, which is not
+very efficient, but should work everywhere.
 
 Because AnyEvent first checks for modules that are already loaded, loading
 an event model explicitly before first using AnyEvent will likely make
@@ -147,8 +148,8 @@ creates a watcher waiting for "r"eadable or "w"ritable events,
 respectively. C<cb> is the callback to invoke each time the file handle
 becomes ready.
 
-File handles will be kept alive, so as long as the watcher exists, the
-file handle exists, too.
+As long as the I/O watcher exists it will keep the file descriptor or a
+copy of it alive/open.
 
 It is not allowed to close a file handle as long as any watcher is active
 on the underlying file descriptor.
@@ -208,15 +209,16 @@ There are two ways to handle timers: based on real time (relative, "fire
 in 10 seconds") and based on wallclock time (absolute, "fire at 12
 o'clock").
 
-While most event loops expect timers to specified in a relative way, they use
-absolute time internally. This makes a difference when your clock "jumps",
-for example, when ntp decides to set your clock backwards from the wrong 2014-01-01 to
-2008-01-01, a watcher that you created to fire "after" a second might actually take
-six years to finally fire.
+While most event loops expect timers to specified in a relative way, they
+use absolute time internally. This makes a difference when your clock
+"jumps", for example, when ntp decides to set your clock backwards from
+the wrong date of 2014-01-01 to 2008-01-01, a watcher that is supposed to
+fire "after" a second might actually take six years to finally fire.
 
 AnyEvent cannot compensate for this. The only event loop that is conscious
-about these issues is L<EV>, which offers both relative (ev_timer) and
-absolute (ev_periodic) timers.
+about these issues is L<EV>, which offers both relative (ev_timer, based
+on true relative time) and absolute (ev_periodic, based on wallclock time)
+timers.
 
 AnyEvent always prefers relative timers, if available, matching the
 AnyEvent API.
@@ -227,7 +229,7 @@ You can watch for signals using a signal watcher, C<signal> is the signal
 I<name> without any C<SIG> prefix, C<cb> is the Perl callback to
 be invoked whenever a signal occurs.
 
-Multiple signals occurances can be clumped together into one callback
+Multiple signal occurances can be clumped together into one callback
 invocation, and callback invocation will be synchronous. synchronous means
 that it might take a while until the signal gets handled by the process,
 but it is guarenteed not to interrupt any other callbacks.
@@ -355,11 +357,13 @@ The known classes so far are:
 
    AnyEvent::Impl::CoroEV    based on Coro::EV, best choice.
    AnyEvent::Impl::CoroEvent based on Coro::Event, second best choice.
-   AnyEvent::Impl::EV        based on EV (an interface to libev, also best choice).
-   AnyEvent::Impl::Event     based on Event, also second best choice :)
+   AnyEvent::Impl::EV        based on EV (an interface to libev, best choice).
+   AnyEvent::Impl::Event     based on Event, second best choice.
    AnyEvent::Impl::Glib      based on Glib, third-best choice.
    AnyEvent::Impl::Tk        based on Tk, very bad choice.
    AnyEvent::Impl::Perl      pure-perl implementation, inefficient but portable.
+   AnyEvent::Impl::Qt        based on Qt, cannot be autoprobed (see its docs).
+   AnyEvent::Impl::EventLib  based on Event::Lib, leaks memory and worse.
 
 =item AnyEvent::detect
 
@@ -420,7 +424,7 @@ use strict;
 
 use Carp;
 
-our $VERSION = '3.12';
+our $VERSION = '3.2';
 our $MODEL;
 
 our $AUTOLOAD;
@@ -439,41 +443,55 @@ my @models = (
    [Tk::                   => AnyEvent::Impl::Tk::],
    [AnyEvent::Impl::Perl:: => AnyEvent::Impl::Perl::],
 );
+my @models_detect = (
+   [Qt::                   => AnyEvent::Impl::Qt::],       # requires special main program
+   [Event::Lib::           => AnyEvent::Impl::EventLib::], # too buggy
+);
 
-our %method = map +($_ => 1), qw(io timer condvar broadcast wait signal one_event DESTROY);
+our %method = map +($_ => 1), qw(io timer signal child condvar broadcast wait one_event DESTROY);
 
 sub detect() {
    unless ($MODEL) {
       no strict 'refs';
 
-      # check for already loaded models
-      for (@REGISTRY, @models) {
-         my ($package, $model) = @$_;
-         if (${"$package\::VERSION"} > 0) {
-            if (eval "require $model") {
-               $MODEL = $model;
-               warn "AnyEvent: found model '$model', using it.\n" if $verbose > 1;
-               last;
-            }
+      if ($ENV{PERL_ANYEVENT_MODEL} =~ /^([a-zA-Z]+)$/) {
+         my $model = "AnyEvent::Impl::$1";
+         if (eval "require $model") {
+            $MODEL = $model;
+            warn "AnyEvent: loaded model '$model' (forced by \$PERL_ANYEVENT_MODEL), using it.\n" if $verbose > 1;
          }
       }
 
+      # check for already loaded models
       unless ($MODEL) {
-         # try to load a model
-
-         for (@REGISTRY, @models) {
+         for (@REGISTRY, @models, @models_detect) {
             my ($package, $model) = @$_;
-            if (eval "require $package"
-                and ${"$package\::VERSION"} > 0
-                and eval "require $model") {
-               $MODEL = $model;
-               warn "AnyEvent: autoprobed and loaded model '$model', using it.\n" if $verbose > 1;
-               last;
+            if (${"$package\::VERSION"} > 0) {
+               if (eval "require $model") {
+                  $MODEL = $model;
+                  warn "AnyEvent: autodetected model '$model', using it.\n" if $verbose > 1;
+                  last;
+               }
             }
          }
 
-         $MODEL
-           or die "No event module selected for AnyEvent and autodetect failed. Install any one of these modules: EV (or Coro+EV), Event (or Coro+Event), Glib or Tk.";
+         unless ($MODEL) {
+            # try to load a model
+
+            for (@REGISTRY, @models) {
+               my ($package, $model) = @$_;
+               if (eval "require $package"
+                   and ${"$package\::VERSION"} > 0
+                   and eval "require $model") {
+                  $MODEL = $model;
+                  warn "AnyEvent: autoprobed model '$model', using it.\n" if $verbose > 1;
+                  last;
+               }
+            }
+
+            $MODEL
+              or die "No event module selected for AnyEvent and autodetect failed. Install any one of these modules: EV (or Coro+EV), Event (or Coro+Event) or Glib.";
+         }
       }
 
       unshift @ISA, $MODEL;
@@ -639,8 +657,30 @@ not be done in an interactive application, so it makes sense.
 
 The following environment variables are used by this module:
 
-C<PERL_ANYEVENT_VERBOSE> when set to C<2> or higher, cause AnyEvent to
-report to STDERR which event model it chooses.
+=over 4
+
+=item C<PERL_ANYEVENT_VERBOSE>
+
+When set to C<2> or higher, cause AnyEvent to report to STDERR which event
+model it chooses.
+
+=item C<PERL_ANYEVENT_MODEL>
+
+This can be used to specify the event model to be used by AnyEvent, before
+autodetection and -probing kicks in. It must be a string consisting
+entirely of ASCII letters. The string C<AnyEvent::Impl::> gets prepended
+and the resulting module name is loaded and if the load was successful,
+used as event model. If it fails to load AnyEvent will proceed with
+autodetection and -probing.
+
+This functionality might change in future versions.
+
+For example, to force the pure perl model (L<AnyEvent::Impl::Perl>) you
+could start your program like this:
+
+  PERL_ANYEVENT_MODEL=Perl perl ...
+
+=back
 
 =head1 EXAMPLE PROGRAM
 
@@ -798,14 +838,40 @@ anything about events.
 
    $quit->wait;
 
+=head1 FORK
+
+Most event libraries are not fork-safe. The ones who are usually are
+because they are so inefficient. Only L<EV> is fully fork-aware.
+
+If you have to fork, you must either do so I<before> creating your first
+watcher OR you must not use AnyEvent at all in the child.
+
+=head1 SECURITY CONSIDERATIONS
+
+AnyEvent can be forced to load any event model via
+$ENV{PERL_ANYEVENT_MODEL}. While this cannot (to my knowledge) be used to
+execute arbitrary code or directly gain access, it can easily be used to
+make the program hang or malfunction in subtle ways, as AnyEvent watchers
+will not be active when the program uses a different event model than
+specified in the variable.
+
+You can make AnyEvent completely ignore this variable by deleting it
+before the first watcher gets created, e.g. with a C<BEGIN> block:
+
+  BEGIN { delete $ENV{PERL_ANYEVENT_MODEL} }
+
+  use AnyEvent;
+
 =head1 SEE ALSO
 
 Event modules: L<Coro::EV>, L<EV>, L<EV::Glib>, L<Glib::EV>,
-L<Coro::Event>, L<Event>, L<Glib::Event>, L<Glib>, L<Coro>, L<Tk>.
+L<Coro::Event>, L<Event>, L<Glib::Event>, L<Glib>, L<Coro>, L<Tk>,
+L<Event::Lib>, L<Qt>.
 
 Implementations: L<AnyEvent::Impl::CoroEV>, L<AnyEvent::Impl::EV>,
-L<AnyEvent::Impl::CoroEvent>, L<AnyEvent::Impl::Event>,
-L<AnyEvent::Impl::Glib>, L<AnyEvent::Impl::Tk>, L<AnyEvent::Impl::Perl>.
+L<AnyEvent::Impl::CoroEvent>, L<AnyEvent::Impl::Event>, L<AnyEvent::Impl::Glib>,
+L<AnyEvent::Impl::Tk>, L<AnyEvent::Impl::Perl>, L<AnyEvent::Impl::EventLib>,
+L<AnyEvent::Impl::Qt>.
 
 Nontrivial usage examples: L<Net::FCP>, L<Net::XMPP2>.
 
