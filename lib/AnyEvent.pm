@@ -2,7 +2,7 @@
 
 AnyEvent - provide framework for multiple event loops
 
-EV, Event, Coro::EV, Coro::Event, Glib, Tk, Perl, Event::Lib, Qt - various supported event loops
+EV, Event, Coro::EV, Coro::Event, Glib, Tk, Perl, Event::Lib, Qt, POE - various supported event loops
 
 =head1 SYNOPSIS
 
@@ -68,7 +68,6 @@ Of course, if you want lots of policy (this can arguably be somewhat
 useful) and you want to force your users to use the one and only event
 model, you should I<not> use this module.
 
-
 =head1 DESCRIPTION
 
 L<AnyEvent> provides an identical interface to multiple event loops. This
@@ -80,11 +79,12 @@ The interface itself is vaguely similar, but not identical to the L<Event>
 module.
 
 During the first call of any watcher-creation method, the module tries
-to detect the currently loaded event loop by probing whether one of
-the following modules is already loaded: L<Coro::EV>, L<Coro::Event>,
-L<EV>, L<Event>, L<Glib>, L<Tk>, L<Event::Lib>, L<Qt>. The first one
-found is used. If none are found, the module tries to load these modules
-(excluding Event::Lib and Qt) in the order given. The first one that can
+to detect the currently loaded event loop by probing whether one of the
+following modules is already loaded: L<Coro::EV>, L<Coro::Event>, L<EV>,
+L<Event>, L<Glib>, L<AnyEvent::Impl::Perl>, L<Tk>, L<Event::Lib>, L<Qt>,
+L<POE>. The first one found is used. If none are found, the module tries
+to load these modules (excluding Tk, Event::Lib, Qt and POE as the pure perl
+adaptor should always succeed) in the order given. The first one that can
 be successfully loaded will be used. If, after this, still none could be
 found, AnyEvent will fall back to a pure-perl event loop, which is not
 very efficient, but should work everywhere.
@@ -137,22 +137,24 @@ Note that C<my $w; $w => combination. This is necessary because in Perl,
 my variables are only visible after the statement in which they are
 declared.
 
-=head2 IO WATCHERS
+=head2 I/O WATCHERS
 
 You can create an I/O watcher by calling the C<< AnyEvent->io >> method
 with the following mandatory key-value pairs as arguments:
 
-C<fh> the Perl I<file handle> (I<not> file descriptor) to watch for
-events. C<poll> must be a string that is either C<r> or C<w>, which
-creates a watcher waiting for "r"eadable or "w"ritable events,
+C<fh> the Perl I<file handle> (I<not> file descriptor) to watch
+for events. C<poll> must be a string that is either C<r> or C<w>,
+which creates a watcher waiting for "r"eadable or "w"ritable events,
 respectively. C<cb> is the callback to invoke each time the file handle
 becomes ready.
 
-As long as the I/O watcher exists it will keep the file descriptor or a
-copy of it alive/open.
+Although the callback might get passed parameters, their value and
+presence is undefined and you cannot rely on them. Portable AnyEvent
+callbacks cannot use arguments passed to I/O watcher callbacks.
 
-It is not allowed to close a file handle as long as any watcher is active
-on the underlying file descriptor.
+The I/O watcher might use the underlying file descriptor or a copy of it.
+You must not close a file handle as long as any watcher is active on the
+underlying file descriptor.
 
 Some event loops issue spurious readyness notifications, so you should
 always use non-blocking calls when reading/writing from/to your file
@@ -173,8 +175,12 @@ You can create a time watcher by calling the C<< AnyEvent->timer >>
 method with the following mandatory arguments:
 
 C<after> specifies after how many seconds (fractional values are
-supported) should the timer activate. C<cb> the callback to invoke in that
-case.
+supported) the callback should be invoked. C<cb> is the callback to invoke
+in that case.
+
+Although the callback might get passed parameters, their value and
+presence is undefined and you cannot rely on them. Portable AnyEvent
+callbacks cannot use arguments passed to time watcher callbacks.
 
 The timer callback will be invoked at most once: if you want a repeating
 timer you have to create a new watcher (this is a limitation by both Tk
@@ -229,6 +235,10 @@ You can watch for signals using a signal watcher, C<signal> is the signal
 I<name> without any C<SIG> prefix, C<cb> is the Perl callback to
 be invoked whenever a signal occurs.
 
+Although the callback might get passed parameters, their value and
+presence is undefined and you cannot rely on them. Portable AnyEvent
+callbacks cannot use arguments passed to signal watcher callbacks.
+
 Multiple signal occurances can be clumped together into one callback
 invocation, and callback invocation will be synchronous. synchronous means
 that it might take a while until the signal gets handled by the process,
@@ -252,17 +262,40 @@ The child process is specified by the C<pid> argument (if set to C<0>, it
 watches for any child process exit). The watcher will trigger as often
 as status change for the child are received. This works by installing a
 signal handler for C<SIGCHLD>. The callback will be called with the pid
-and exit status (as returned by waitpid).
+and exit status (as returned by waitpid), so unlike other watcher types,
+you I<can> rely on child watcher callback arguments.
 
-Example: wait for pid 1333
+There is a slight catch to child watchers, however: you usually start them
+I<after> the child process was created, and this means the process could
+have exited already (and no SIGCHLD will be sent anymore).
+
+Not all event models handle this correctly (POE doesn't), but even for
+event models that I<do> handle this correctly, they usually need to be
+loaded before the process exits (i.e. before you fork in the first place).
+
+This means you cannot create a child watcher as the very first thing in an
+AnyEvent program, you I<have> to create at least one watcher before you
+C<fork> the child (alternatively, you can call C<AnyEvent::detect>).
+
+Example: fork a process and wait for it
+
+  my $done = AnyEvent->condvar;
+
+  AnyEvent::detect; # force event module to be initialised
+
+  my $pid = fork or exit 5;
 
   my $w = AnyEvent->child (
-     pid => 1333,
+     pid => $pid,
      cb  => sub {
         my ($pid, $status) = @_;
         warn "pid $pid exited with status $status";
+        $done->broadcast;
      },
   );
+
+  # do something else, then wait for process exit
+  $done->wait;
 
 =head2 CONDITION VARIABLES
 
@@ -360,10 +393,21 @@ The known classes so far are:
    AnyEvent::Impl::EV        based on EV (an interface to libev, best choice).
    AnyEvent::Impl::Event     based on Event, second best choice.
    AnyEvent::Impl::Glib      based on Glib, third-best choice.
-   AnyEvent::Impl::Tk        based on Tk, very bad choice.
    AnyEvent::Impl::Perl      pure-perl implementation, inefficient but portable.
+   AnyEvent::Impl::Tk        based on Tk, very bad choice.
    AnyEvent::Impl::Qt        based on Qt, cannot be autoprobed (see its docs).
    AnyEvent::Impl::EventLib  based on Event::Lib, leaks memory and worse.
+   AnyEvent::Impl::POE       based on POE, not generic enough for full support.
+
+There is no support for WxWidgets, as WxWidgets has no support for
+watching file handles. However, you can use WxWidgets through the
+POE Adaptor, as POE has a Wx backend that simply polls 20 times per
+second, which was considered to be too horrible to even consider for
+AnyEvent. Likewise, other POE backends can be used by AnyEvent by using
+it's adaptor.
+
+AnyEvent knows about L<Prima> and L<Wx> and will try to use L<POE> when
+autodetecting them.
 
 =item AnyEvent::detect
 
@@ -415,6 +459,78 @@ You can chose to use a rather inefficient pure-perl implementation by
 loading the C<AnyEvent::Impl::Perl> module, which gives you similar
 behaviour everywhere, but letting AnyEvent chose is generally better.
 
+=head1 OTHER MODULES
+
+The following is a non-exhaustive list of additional modules that use
+AnyEvent and can therefore be mixed easily with other AnyEvent modules
+in the same program. Some of the modules come with AnyEvent, some are
+available via CPAN.
+
+=over 4
+
+=item L<AnyEvent::Util>
+
+Contains various utility functions that replace often-used but blocking
+functions such as C<inet_aton> by event-/callback-based versions.
+
+=item L<AnyEvent::Handle>
+
+Provide read and write buffers and manages watchers for reads and writes.
+
+=item L<AnyEvent::Socket>
+
+Provides a means to do non-blocking connects, accepts etc.
+
+=item L<AnyEvent::HTTPD>
+
+Provides a simple web application server framework.
+
+=item L<AnyEvent::DNS>
+
+Provides asynchronous DNS resolver capabilities, beyond what
+L<AnyEvent::Util> offers.
+
+=item L<AnyEvent::FastPing>
+
+The fastest ping in the west.
+
+=item L<Net::IRC3>
+
+AnyEvent based IRC client module family.
+
+=item L<Net::XMPP2>
+
+AnyEvent based XMPP (Jabber protocol) module family.
+
+=item L<Net::FCP>
+
+AnyEvent-based implementation of the Freenet Client Protocol, birthplace
+of AnyEvent.
+
+=item L<Event::ExecFlow>
+
+High level API for event-based execution flow control.
+
+=item L<Coro>
+
+Has special support for AnyEvent.
+
+=item L<IO::Lambda>
+
+The lambda approach to I/O - don't ask, look there. Can use AnyEvent.
+
+=item L<IO::AIO>
+
+Truly asynchronous I/O, should be in the toolbox of every event
+programmer. Can be trivially made to use AnyEvent.
+
+=item L<BDB>
+
+Truly asynchronous Berkeley DB access. Can be trivially made to use
+AnyEvent.
+
+=back
+
 =cut
 
 package AnyEvent;
@@ -424,7 +540,7 @@ use strict;
 
 use Carp;
 
-our $VERSION = '3.2';
+our $VERSION = '3.3';
 our $MODEL;
 
 our $AUTOLOAD;
@@ -441,11 +557,13 @@ my @models = (
    [Event::                => AnyEvent::Impl::Event::],
    [Glib::                 => AnyEvent::Impl::Glib::],
    [Tk::                   => AnyEvent::Impl::Tk::],
+   [Wx::                   => AnyEvent::Impl::POE::],
+   [Prima::                => AnyEvent::Impl::POE::],
    [AnyEvent::Impl::Perl:: => AnyEvent::Impl::Perl::],
-);
-my @models_detect = (
-   [Qt::                   => AnyEvent::Impl::Qt::],       # requires special main program
+   # everything below here will not be autoprobed as the pureperl backend should work everywhere
    [Event::Lib::           => AnyEvent::Impl::EventLib::], # too buggy
+   [Qt::                   => AnyEvent::Impl::Qt::],       # requires special main program
+   [POE::Kernel::          => AnyEvent::Impl::POE::],      # lasciate ogni speranza
 );
 
 our %method = map +($_ => 1), qw(io timer signal child condvar broadcast wait one_event DESTROY);
@@ -459,12 +577,14 @@ sub detect() {
          if (eval "require $model") {
             $MODEL = $model;
             warn "AnyEvent: loaded model '$model' (forced by \$PERL_ANYEVENT_MODEL), using it.\n" if $verbose > 1;
+         } else {
+            warn "AnyEvent: unable to load model '$model' (from \$PERL_ANYEVENT_MODEL):\n$@" if $verbose;
          }
       }
 
       # check for already loaded models
       unless ($MODEL) {
-         for (@REGISTRY, @models, @models_detect) {
+         for (@REGISTRY, @models) {
             my ($package, $model) = @$_;
             if (${"$package\::VERSION"} > 0) {
                if (eval "require $model") {
@@ -661,6 +781,14 @@ The following environment variables are used by this module:
 
 =item C<PERL_ANYEVENT_VERBOSE>
 
+By default, AnyEvent will be completely silent except in fatal
+conditions. You can set this environment variable to make AnyEvent more
+talkative.
+
+When set to C<1> or higher, causes AnyEvent to warn about unexpected
+conditions, such as not being able to load the event model specified by
+C<PERL_ANYEVENT_MODEL>.
+
 When set to C<2> or higher, cause AnyEvent to report to STDERR which event
 model it chooses.
 
@@ -684,7 +812,7 @@ could start your program like this:
 
 =head1 EXAMPLE PROGRAM
 
-The following program uses an IO watcher to read data from STDIN, a timer
+The following program uses an I/O watcher to read data from STDIN, a timer
 to display a message once per second, and a condition variable to quit the
 program when the user enters quit:
 
@@ -838,6 +966,269 @@ anything about events.
 
    $quit->wait;
 
+
+=head1 BENCHMARKS
+
+To give you an idea of the performance and overheads that AnyEvent adds
+over the event loops themselves and to give you an impression of the speed
+of various event loops I prepared some benchmarks.
+
+=head2 BENCHMARKING ANYEVENT OVERHEAD
+
+Here is a benchmark of various supported event models used natively and
+through anyevent. The benchmark creates a lot of timers (with a zero
+timeout) and I/O watchers (watching STDOUT, a pty, to become writable,
+which it is), lets them fire exactly once and destroys them again.
+
+Source code for this benchmark is found as F<eg/bench> in the AnyEvent
+distribution.
+
+=head3 Explanation of the columns
+
+I<watcher> is the number of event watchers created/destroyed. Since
+different event models feature vastly different performances, each event
+loop was given a number of watchers so that overall runtime is acceptable
+and similar between tested event loop (and keep them from crashing): Glib
+would probably take thousands of years if asked to process the same number
+of watchers as EV in this benchmark.
+
+I<bytes> is the number of bytes (as measured by the resident set size,
+RSS) consumed by each watcher. This method of measuring captures both C
+and Perl-based overheads.
+
+I<create> is the time, in microseconds (millionths of seconds), that it
+takes to create a single watcher. The callback is a closure shared between
+all watchers, to avoid adding memory overhead. That means closure creation
+and memory usage is not included in the figures.
+
+I<invoke> is the time, in microseconds, used to invoke a simple
+callback. The callback simply counts down a Perl variable and after it was
+invoked "watcher" times, it would C<< ->broadcast >> a condvar once to
+signal the end of this phase.
+
+I<destroy> is the time, in microseconds, that it takes to destroy a single
+watcher.
+
+=head3 Results
+
+          name watchers bytes create invoke destroy comment
+         EV/EV   400000   244   0.56   0.46    0.31 EV native interface
+        EV/Any   100000   244   2.50   0.46    0.29 EV + AnyEvent watchers
+    CoroEV/Any   100000   244   2.49   0.44    0.29 coroutines + Coro::Signal
+      Perl/Any   100000   513   4.92   0.87    1.12 pure perl implementation
+   Event/Event    16000   516  31.88  31.30    0.85 Event native interface
+     Event/Any    16000   590  35.75  31.42    1.08 Event + AnyEvent watchers
+      Glib/Any    16000  1357  98.22  12.41   54.00 quadratic behaviour
+        Tk/Any     2000  1860  26.97  67.98   14.00 SEGV with >> 2000 watchers
+     POE/Event     2000  6644 108.64 736.02   14.73 via POE::Loop::Event
+    POE/Select     2000  6343  94.13 809.12  565.96 via POE::Loop::Select
+
+=head3 Discussion
+
+The benchmark does I<not> measure scalability of the event loop very
+well. For example, a select-based event loop (such as the pure perl one)
+can never compete with an event loop that uses epoll when the number of
+file descriptors grows high. In this benchmark, all events become ready at
+the same time, so select/poll-based implementations get an unnatural speed
+boost.
+
+Also, note that the number of watchers usually has a nonlinear effect on
+overall speed, that is, creating twice as many watchers doesn't take twice
+the time - usually it takes longer. This puts event loops tested with a
+higher number of watchers at a disadvantage.
+
+To put the range of results into perspective, consider that on the
+benchmark machine, handling an event takes roughly 1600 CPU cycles with
+EV, 3100 CPU cycles with AnyEvent's pure perl loop and almost 3000000 CPU
+cycles with POE.
+
+C<EV> is the sole leader regarding speed and memory use, which are both
+maximal/minimal, respectively. Even when going through AnyEvent, it uses
+far less memory than any other event loop and is still faster than Event
+natively.
+
+The pure perl implementation is hit in a few sweet spots (both the
+constant timeout and the use of a single fd hit optimisations in the perl
+interpreter and the backend itself). Nevertheless this shows that it
+adds very little overhead in itself. Like any select-based backend its
+performance becomes really bad with lots of file descriptors (and few of
+them active), of course, but this was not subject of this benchmark.
+
+The C<Event> module has a relatively high setup and callback invocation
+cost, but overall scores in on the third place.
+
+C<Glib>'s memory usage is quite a bit higher, but it features a
+faster callback invocation and overall ends up in the same class as
+C<Event>. However, Glib scales extremely badly, doubling the number of
+watchers increases the processing time by more than a factor of four,
+making it completely unusable when using larger numbers of watchers
+(note that only a single file descriptor was used in the benchmark, so
+inefficiencies of C<poll> do not account for this).
+
+The C<Tk> adaptor works relatively well. The fact that it crashes with
+more than 2000 watchers is a big setback, however, as correctness takes
+precedence over speed. Nevertheless, its performance is surprising, as the
+file descriptor is dup()ed for each watcher. This shows that the dup()
+employed by some adaptors is not a big performance issue (it does incur a
+hidden memory cost inside the kernel which is not reflected in the figures
+above).
+
+C<POE>, regardless of underlying event loop (whether using its pure
+perl select-based backend or the Event module, the POE-EV backend
+couldn't be tested because it wasn't working) shows abysmal performance
+and memory usage: Watchers use almost 30 times as much memory as
+EV watchers, and 10 times as much memory as Event (the high memory
+requirements are caused by requiring a session for each watcher). Watcher
+invocation speed is almost 900 times slower than with AnyEvent's pure perl
+implementation. The design of the POE adaptor class in AnyEvent can not
+really account for this, as session creation overhead is small compared
+to execution of the state machine, which is coded pretty optimally within
+L<AnyEvent::Impl::POE>. POE simply seems to be abysmally slow.
+
+=head3 Summary
+
+=over 4
+
+=item * Using EV through AnyEvent is faster than any other event loop
+(even when used without AnyEvent), but most event loops have acceptable
+performance with or without AnyEvent.
+
+=item * The overhead AnyEvent adds is usually much smaller than the overhead of
+the actual event loop, only with extremely fast event loops such as EV
+adds AnyEvent significant overhead.
+
+=item * You should avoid POE like the plague if you want performance or
+reasonable memory usage.
+
+=back
+
+=head2 BENCHMARKING THE LARGE SERVER CASE
+
+This benchmark atcually benchmarks the event loop itself. It works by
+creating a number of "servers": each server consists of a socketpair, a
+timeout watcher that gets reset on activity (but never fires), and an I/O
+watcher waiting for input on one side of the socket. Each time the socket
+watcher reads a byte it will write that byte to a random other "server".
+
+The effect is that there will be a lot of I/O watchers, only part of which
+are active at any one point (so there is a constant number of active
+fds for each loop iterstaion, but which fds these are is random). The
+timeout is reset each time something is read because that reflects how
+most timeouts work (and puts extra pressure on the event loops).
+
+In this benchmark, we use 10000 socketpairs (20000 sockets), of which 100
+(1%) are active. This mirrors the activity of large servers with many
+connections, most of which are idle at any one point in time.
+
+Source code for this benchmark is found as F<eg/bench2> in the AnyEvent
+distribution.
+
+=head3 Explanation of the columns
+
+I<sockets> is the number of sockets, and twice the number of "servers" (as
+each server has a read and write socket end).
+
+I<create> is the time it takes to create a socketpair (which is
+nontrivial) and two watchers: an I/O watcher and a timeout watcher.
+
+I<request>, the most important value, is the time it takes to handle a
+single "request", that is, reading the token from the pipe and forwarding
+it to another server. This includes deleting the old timeout and creating
+a new one that moves the timeout into the future.
+
+=head3 Results
+
+    name sockets create  request 
+      EV   20000  69.01    11.16 
+    Perl   20000  73.32    35.87 
+   Event   20000 212.62   257.32 
+    Glib   20000 651.16  1896.30 
+     POE   20000 349.67 12317.24 uses POE::Loop::Event
+
+=head3 Discussion
+
+This benchmark I<does> measure scalability and overall performance of the
+particular event loop.
+
+EV is again fastest. Since it is using epoll on my system, the setup time
+is relatively high, though.
+
+Perl surprisingly comes second. It is much faster than the C-based event
+loops Event and Glib.
+
+Event suffers from high setup time as well (look at its code and you will
+understand why). Callback invocation also has a high overhead compared to
+the C<< $_->() for .. >>-style loop that the Perl event loop uses. Event
+uses select or poll in basically all documented configurations.
+
+Glib is hit hard by its quadratic behaviour w.r.t. many watchers. It
+clearly fails to perform with many filehandles or in busy servers.
+
+POE is still completely out of the picture, taking over 1000 times as long
+as EV, and over 100 times as long as the Perl implementation, even though
+it uses a C-based event loop in this case.
+
+=head3 Summary
+
+=over 4
+
+=item * The pure perl implementation performs extremely well, considering
+that it uses select.
+
+=item * Avoid Glib or POE in large projects where performance matters.
+
+=back
+
+=head2 BENCHMARKING SMALL SERVERS
+
+While event loops should scale (and select-based ones do not...) even to
+large servers, most programs we (or I :) actually write have only a few
+I/O watchers.
+
+In this benchmark, I use the same benchmark program as in the large server
+case, but it uses only eight "servers", of which three are active at any
+one time. This should reflect performance for a small server relatively
+well.
+
+The columns are identical to the previous table.
+
+=head3 Results
+
+    name sockets create request 
+      EV      16  20.00    6.54 
+    Perl      16  25.75   12.62 
+   Event      16  81.27   35.86 
+    Glib      16  32.63   15.48 
+     POE      16 261.87  276.28 uses POE::Loop::Event
+
+=head3 Discussion
+
+The benchmark tries to test the performance of a typical small
+server. While knowing how various event loops perform is interesting, keep
+in mind that their overhead in this case is usually not as important, due
+to the small absolute number of watchers (that is, you need efficiency and
+speed most when you have lots of watchers, not when you only have a few of
+them).
+
+EV is again fastest.
+
+Perl again comes second. It is noticably faster than the C-based event
+loops Event and Glib, although the difference is too small to really
+matter.
+
+POE also performs much better in this case, but is is still far behind the
+others.
+
+=head3 Summary
+
+=over 4
+
+=item * C-based event loops perform very well with small number of
+watchers, as the management overhead dominates.
+
+=back
+
+
 =head1 FORK
 
 Most event libraries are not fork-safe. The ones who are usually are
@@ -845,6 +1236,7 @@ because they are so inefficient. Only L<EV> is fully fork-aware.
 
 If you have to fork, you must either do so I<before> creating your first
 watcher OR you must not use AnyEvent at all in the child.
+
 
 =head1 SECURITY CONSIDERATIONS
 
@@ -862,18 +1254,20 @@ before the first watcher gets created, e.g. with a C<BEGIN> block:
 
   use AnyEvent;
 
+
 =head1 SEE ALSO
 
 Event modules: L<Coro::EV>, L<EV>, L<EV::Glib>, L<Glib::EV>,
 L<Coro::Event>, L<Event>, L<Glib::Event>, L<Glib>, L<Coro>, L<Tk>,
-L<Event::Lib>, L<Qt>.
+L<Event::Lib>, L<Qt>, L<POE>.
 
 Implementations: L<AnyEvent::Impl::CoroEV>, L<AnyEvent::Impl::EV>,
 L<AnyEvent::Impl::CoroEvent>, L<AnyEvent::Impl::Event>, L<AnyEvent::Impl::Glib>,
 L<AnyEvent::Impl::Tk>, L<AnyEvent::Impl::Perl>, L<AnyEvent::Impl::EventLib>,
-L<AnyEvent::Impl::Qt>.
+L<AnyEvent::Impl::Qt>, L<AnyEvent::Impl::POE>.
 
 Nontrivial usage examples: L<Net::FCP>, L<Net::XMPP2>.
+
 
 =head1 AUTHOR
 
