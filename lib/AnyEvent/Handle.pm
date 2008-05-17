@@ -14,9 +14,11 @@ use Errno qw/EAGAIN EINTR/;
 
 AnyEvent::Handle - non-blocking I/O on filehandles via AnyEvent
 
+This module is experimental.
+
 =cut
 
-our $VERSION = '0.02';
+our $VERSION = '0.04';
 
 =head1 SYNOPSIS
 
@@ -45,8 +47,8 @@ our $VERSION = '0.02';
 =head1 DESCRIPTION
 
 This module is a helper module to make it easier to do event-based I/O on
-filehandles (and sockets, see L<AnyEvent::Socket> for an easy way to make
-non-blocking resolves and connects).
+filehandles. For utility functions for doing non-blocking connects and accepts
+on sockets see L<AnyEvent::Util>.
 
 In the following, when the documentation refers to of "bytes" then this
 means characters. As sysread and syswrite are used for all I/O, their
@@ -487,7 +489,7 @@ sub _read_chunk($$) {
 
    sub {
       $len <= length $_[0]{rbuf} or return;
-      $cb->($self, $_[0], substr $_[0]{rbuf}, 0, $len, "");
+      $cb->($_[0], substr $_[0]{rbuf}, 0, $len, "");
       1
    }
 }
@@ -533,13 +535,13 @@ sub _read_line($$) {
    my $eol = @_ ? shift : qr|(\015?\012)|;
    my $pos;
 
-   $eol = qr|(\Q$eol\E)| unless ref $eol;
-   $eol = qr|^(.*?)($eol)|;
+   $eol = quotemeta $eol unless ref $eol;
+   $eol = qr|^(.*?)($eol)|s;
 
    sub {
       $_[0]{rbuf} =~ s/$eol// or return;
 
-      $cb->($self, $1, $2);
+      $cb->($_[0], $1, $2);
       1
    }
 }

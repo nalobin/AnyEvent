@@ -1,5 +1,21 @@
 Revision history for Perl extension AnyEvent.
 
+3.5  Sat May 17 23:17:14 CEST 2008
+	- gracefully deal with systems not defining CLOCK_MONOTONIC
+          (as opposed to not supporting the clock itself, which worked in 3.41).
+	- added AnyEvent::Util::tcp_connect and AnyEvent::Util::tcp_server
+          helpers, to replace the ill-designed AnyEvent::Socket class.
+	- added some examples (eg/connect, eg/handle).
+	- added AnyEvent::Util::guard.
+        - AnyEvent::Util now exports most of its functions.
+	- fixed a bug in *_read_chunk, where the callback was called with $self as
+          first and second argument.
+        - simplified and fixed regex handling in AnyEvent::Handle::*_read_line.
+	- fix manpage condvars examples to use new syntax.
+        - considerably improve inet_aton with EV::ADNS backend to support
+          cname chains (common dns configuration bug, e.g. with www.google.de)
+          and aaaa records if no a record could be found.
+
 3.41 Sun May 11 19:53:13 CEST 2008
 	- work around a bug in perl 5.8.8's local. Reported by Yi Ma Mao.
 
