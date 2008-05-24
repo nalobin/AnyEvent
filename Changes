@@ -1,5 +1,26 @@
 Revision history for Perl extension AnyEvent.
 
+4.0  Sat May 24 19:58:08 CEST 2008
+	- added (experimental) AnyEvent::DNS module.
+        - added (experimental) AnyEvent::Socket module.
+        - added (experiemntal) support for TLS/SSL in AnyEvent::Handle.
+        - make condvar->end call ->send as documented.
+        - make condvar constructor support the documented cb => argument.
+        - overload condvars so you can use them instead of code references.
+        - support more of the POSIX forms instead of a pure dotted quad for
+          verbatim ip addresses.
+        - AnyEvent::Socket::inet_aton will use AnyEvent::DNS now and not fork anymore.
+	- try very hard not to freeze on broken windows perls.
+        - make on_eof optional in AnyEvent::Handle.
+	- support service names in tcp_connect and tcp_server.
+        - work around netbsd/openbsd bug causing unix sockets not to
+          become writable untill empty.
+	- only make a dummy read for error detection when getpeername
+          returns ENOTCONN.
+        - defend AnyEvent::Util::inet_aton against Coro::LWP brutal
+          override.
+        - new AnyEvent::Guard::cancel.
+
 3.5  Sat May 17 23:17:14 CEST 2008
 	- gracefully deal with systems not defining CLOCK_MONOTONIC
           (as opposed to not supporting the clock itself, which worked in 3.41).
