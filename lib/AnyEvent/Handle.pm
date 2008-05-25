@@ -4,7 +4,7 @@ no warnings;
 use strict;
 
 use AnyEvent ();
-use AnyEvent::Util ();
+use AnyEvent::Util qw(WSAWOULDBLOCK);
 use Scalar::Util ();
 use Carp ();
 use Fcntl ();
@@ -13,8 +13,6 @@ use Errno qw/EAGAIN EINTR/;
 =head1 NAME
 
 AnyEvent::Handle - non-blocking I/O on file handles via AnyEvent
-
-This module is experimental.
 
 =cut
 
@@ -27,22 +25,25 @@ our $VERSION = '0.04';
 
    my $cv = AnyEvent->condvar;
 
-   my $ae_fh = AnyEvent::Handle->new (fh => \*STDIN);
-
-   #TODO
-
-   # or use the constructor to pass the callback:
-
-   my $ae_fh2 =
+   my $handle =
       AnyEvent::Handle->new (
          fh => \*STDIN,
          on_eof => sub {
             $cv->broadcast;
          },
-         #TODO
       );
 
-   $cv->wait;
+   # send some request line
+   $handle->push_write ("getinfo\015\012");
+
+   # read the response line
+   $handle->push_read (line => sub {
+      my ($handle, $line) = @_;
+      warn "read line <$line>\n";
+      $cv->send;
+   });
+
+   $cv->recv;
 
 =head1 DESCRIPTION
 
@@ -92,7 +93,7 @@ The object will not be in a usable state when this callback has been
 called.
 
 On callback entrance, the value of C<$!> contains the operating system
-error (or C<ENOSPC> or C<EPIPE>).
+error (or C<ENOSPC>, C<EPIPE> or C<EBADMSG>).
 
 While not mandatory, it is I<highly> recommended to set this callback, as
 you will not be notified of errors otherwise. The default simply calls
@@ -213,7 +214,7 @@ sub error {
    if ($self->{on_error}) {
       $self->{on_error}($self);
    } else {
-      die "AnyEvent::Handle uncaught fatal error: $!";
+      Carp::croak "AnyEvent::Handle uncaught fatal error: $!";
    }
 }
 
@@ -289,12 +290,12 @@ buffers it independently of the kernel.
 sub _drain_wbuf {
    my ($self) = @_;
 
-   unless ($self->{ww}) {
+   if (!$self->{ww} && length $self->{wbuf}) {
       Scalar::Util::weaken $self;
       my $cb = sub {
          my $len = syswrite $self->{fh}, $self->{wbuf};
 
-         if ($len > 0) {
+         if ($len >= 0) {
             substr $self->{wbuf}, 0, $len, "";
 
             $self->{on_drain}($self)
@@ -302,7 +303,7 @@ sub _drain_wbuf {
                   && $self->{on_drain};
 
             delete $self->{ww} unless length $self->{wbuf};
-         } elsif ($! != EAGAIN && $! != EINTR) {
+         } elsif ($! != EAGAIN && $! != EINTR && $! != WSAWOULDBLOCK) {
             $self->error;
          }
       };
@@ -313,8 +314,21 @@ sub _drain_wbuf {
    };
 }
 
+our %WH;
+
+sub register_write_type($$) {
+   $WH{$_[0]} = $_[1];
+}
+
 sub push_write {
    my $self = shift;
+
+   if (@_ > 1) {
+      my $type = shift;
+
+      @_ = ($WH{$type} or Carp::croak "unsupported type passed to AnyEvent::Handle::push_write")
+           ->($self, @_);
+   }
 
    if ($self->{filter_w}) {
       $self->{filter_w}->($self, \$_[0]);
@@ -323,6 +337,47 @@ sub push_write {
       $self->_drain_wbuf;
    }
 }
+
+=item $handle->push_write (type => @args)
+
+=item $handle->unshift_write (type => @args)
+
+Instead of formatting your data yourself, you can also let this module do
+the job by specifying a type and type-specific arguments.
+
+Predefined types are (if you have ideas for additional types, feel free to
+drop by and tell us):
+
+=over 4
+
+=item netstring => $string
+
+Formats the given value as netstring
+(http://cr.yp.to/proto/netstrings.txt, this is not a recommendation to use them).
+
+=back
+
+=cut
+
+register_write_type netstring => sub {
+   my ($self, $string) = @_;
+
+   sprintf "%d:%s,", (length $string), $string
+};
+
+=item AnyEvent::Handle::register_write_type type => $coderef->($self, @args)
+
+This function (not method) lets you add your own types to C<push_write>.
+Whenever the given C<type> is used, C<push_write> will invoke the code
+reference with the handle object and the remaining arguments.
+
+The code reference is supposed to return a single octet string that will
+be appended to the write buffer.
+
+Note that this is a function, and all types registered this way will be
+global, so try to use unique names.
+
+=cut
 
 #############################################################################
 
@@ -420,7 +475,7 @@ sub _drain_rbuf {
    while (my $len = length $self->{rbuf}) {
       no strict 'refs';
       if (my $cb = shift @{ $self->{queue} }) {
-         if (!$cb->($self)) {
+         unless ($cb->($self)) {
             if ($self->{eof}) {
                # no progress can be made (not enough data and no data forthcoming)
                $! = &Errno::EPIPE; return $self->error;
@@ -507,57 +562,90 @@ true, it will be removed from the queue.
 
 =cut
 
+our %RH;
+
+sub register_read_type($$) {
+   $RH{$_[0]} = $_[1];
+}
+
 sub push_read {
-   my ($self, $cb) = @_;
+   my $self = shift;
+   my $cb = pop;
+
+   if (@_) {
+      my $type = shift;
+
+      $cb = ($RH{$type} or Carp::croak "unsupported type passed to AnyEvent::Handle::push_read")
+            ->($self, $cb, @_);
+   }
 
    push @{ $self->{queue} }, $cb;
    $self->_drain_rbuf;
 }
 
 sub unshift_read {
-   my ($self, $cb) = @_;
+   my $self = shift;
+   my $cb = pop;
 
-   push @{ $self->{queue} }, $cb;
+   if (@_) {
+      my $type = shift;
+
+      $cb = ($RH{$type} or Carp::croak "unsupported type passed to AnyEvent::Handle::unshift_read")
+            ->($self, $cb, @_);
+   }
+
+
+   unshift @{ $self->{queue} }, $cb;
    $self->_drain_rbuf;
 }
 
-=item $handle->push_read_chunk ($len, $cb->($self, $data))
+=item $handle->push_read (type => @args, $cb)
 
-=item $handle->unshift_read_chunk ($len, $cb->($self, $data))
+=item $handle->unshift_read (type => @args, $cb)
 
-Append the given callback to the end of the queue (C<push_read_chunk>) or
-prepend it (C<unshift_read_chunk>).
+Instead of providing a callback that parses the data itself you can chose
+between a number of predefined parsing formats, for chunks of data, lines
+etc.
 
-The callback will be called only once C<$len> bytes have been read, and
-these C<$len> bytes will be passed to the callback.
+Predefined types are (if you have ideas for additional types, feel free to
+drop by and tell us):
+
+=over 4
+
+=item chunk => $octets, $cb->($self, $data)
+
+Invoke the callback only once C<$octets> bytes have been read. Pass the
+data read to the callback. The callback will never be called with less
+data.
+
+Example: read 2 bytes.
+
+   $handle->push_read (chunk => 2, sub {
+      warn "yay ", unpack "H*", $_[1];
+   });
 
 =cut
 
-sub _read_chunk($$) {
-   my ($self, $len, $cb) = @_;
+register_read_type chunk => sub {
+   my ($self, $cb, $len) = @_;
 
    sub {
       $len <= length $_[0]{rbuf} or return;
       $cb->($_[0], substr $_[0]{rbuf}, 0, $len, "");
       1
    }
-}
+};
 
+# compatibility with older API
 sub push_read_chunk {
-   $_[0]->push_read (&_read_chunk);
+   $_[0]->push_read (chunk => $_[1], $_[2]);
 }
-
 
 sub unshift_read_chunk {
-   $_[0]->unshift_read (&_read_chunk);
+   $_[0]->unshift_read (chunk => $_[1], $_[2]);
 }
 
-=item $handle->push_read_line ([$eol, ]$cb->($self, $line, $eol))
-
-=item $handle->unshift_read_line ([$eol, ]$cb->($self, $line, $eol))
-
-Append the given callback to the end of the queue (C<push_read_line>) or
-prepend it (C<unshift_read_line>).
+=item line => [$eol, ]$cb->($self, $line, $eol)
 
 The callback will be called only once a full line (including the end of
 line marker, C<$eol>) has been read. This line (excluding the end of line
@@ -578,12 +666,10 @@ not marked by the end of line marker.
 
 =cut
 
-sub _read_line($$) {
-   my $self = shift;
-   my $cb = pop;
-   my $eol = @_ ? shift : qr|(\015?\012)|;
-   my $pos;
+register_read_type line => sub {
+   my ($self, $cb, $eol) = @_;
 
+   $eol = qr|(\015?\012)| if @_ < 3;
    $eol = quotemeta $eol unless ref $eol;
    $eol = qr|^(.*?)($eol)|s;
 
@@ -593,15 +679,78 @@ sub _read_line($$) {
       $cb->($_[0], $1, $2);
       1
    }
-}
+};
 
+# compatibility with older API
 sub push_read_line {
-   $_[0]->push_read (&_read_line);
+   my $self = shift;
+   $self->push_read (line => @_);
 }
 
 sub unshift_read_line {
-   $_[0]->unshift_read (&_read_line);
+   my $self = shift;
+   $self->unshift_read (line => @_);
 }
+
+=item netstring => $cb->($string)
+
+A netstring (http://cr.yp.to/proto/netstrings.txt, this is not an endorsement).
+
+Throws an error with C<$!> set to EBADMSG on format violations.
+
+=cut
+
+register_read_type netstring => sub {
+   my ($self, $cb) = @_;
+
+   sub {
+      unless ($_[0]{rbuf} =~ s/^(0|[1-9][0-9]*)://) {
+         if ($_[0]{rbuf} =~ /[^0-9]/) {
+            $! = &Errno::EBADMSG;
+            $self->error;
+         }
+         return;
+      }
+
+      my $len = $1;
+
+      $self->unshift_read (chunk => $len, sub {
+         my $string = $_[1];
+         $_[0]->unshift_read (chunk => 1, sub {
+            if ($_[1] eq ",") {
+               $cb->($_[0], $string);
+            } else {
+               $! = &Errno::EBADMSG;
+               $self->error;
+            }
+         });
+      });
+
+      1
+   }
+};
+
+=back
+
+=item AnyEvent::Handle::register_read_type type => $coderef->($self, $cb, @args)
+
+This function (not method) lets you add your own types to C<push_read>.
+
+Whenever the given C<type> is used, C<push_read> will invoke the code
+reference with the handle object, the callback and the remaining
+arguments.
+
+The code reference is supposed to return a callback (usually a closure)
+that works as a plain read callback (see C<< ->push_read ($cb) >>).
+
+It should invoke the passed callback when it is done reading (remember to
+pass C<$self> as first argument as all other callbacks do that).
+
+Note that this is a function, and all types registered this way will be
+global, so try to use unique names.
+
+For examples, see the source of this module (F<perldoc -m AnyEvent::Handle>,
+search for C<register_read_type>)).
 
 =item $handle->stop_read
 
@@ -640,7 +789,7 @@ sub start_read {
             $self->{eof} = 1;
             $self->_drain_rbuf;
 
-         } elsif ($! != EAGAIN && $! != EINTR) {
+         } elsif ($! != EAGAIN && $! != EINTR && $! != &AnyEvent::Util::WSAWOULDBLOCK) {
             return $self->error;
          }
       });

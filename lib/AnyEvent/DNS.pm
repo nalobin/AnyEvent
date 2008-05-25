@@ -6,6 +6,11 @@ AnyEvent::DNS - fully asynchronous DNS resolution
 
  use AnyEvent::DNS;
 
+ my $cv = AnyEvent->condvar;
+ AnyEvent::DNS::a "www.google.de", sub { $cv->send (@_) };
+ # ... later
+ my @addrs = $cv->recv;
+
 =head1 DESCRIPTION
 
 This module offers both a number of DNS convenience functions as well
@@ -196,7 +201,7 @@ sub any($$) {
 sub addr($$$$$$) {
    my ($node, $service, $proto, $family, $type, $cb) = @_;
 
-   unless (&AnyEvent::Socket::AF_INET6) {
+   unless (&AnyEvent::Util::AF_INET6) {
       $family != 6
          or return $cb->();
 
@@ -253,7 +258,7 @@ sub addr($$$$$$) {
             }
 
             if (16 == length $noden && $family != 4) {
-               push @res, [$idx, "ipv6", [&AnyEvent::Socket::AF_INET6, $type, $proton,
+               push @res, [$idx, "ipv6", [&AnyEvent::Util::AF_INET6, $type, $proton,
                            AnyEvent::Socket::pack_sockaddr ( $port, $noden)]]
             }
          } else {
@@ -967,8 +972,8 @@ sub _exec {
                   };
 
                $handle->push_write (pack "n/a", $req->[0]);
-               $handle->push_read_chunk (2, sub {
-                  $handle->unshift_read_chunk ((unpack "n", $_[1]), sub {
+               $handle->push_read (chunk => 2, sub {
+                  $handle->unshift_read (chunk => (unpack "n", $_[1]), sub {
                      $self->_feed ($_[1]);
                   });
                });
