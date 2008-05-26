@@ -733,7 +733,7 @@ use strict;
 
 use Carp;
 
-our $VERSION = '4.04';
+our $VERSION = '4.05';
 our $MODEL;
 
 our $AUTOLOAD;
@@ -757,19 +757,6 @@ our %PROTOCOL; # (ipv4|ipv6) => (1|2), higher numbers are preferred
    $PROTOCOL{$_} = ++$idx
       for reverse split /\s*,\s*/,
              $ENV{PERL_ANYEVENT_PROTOCOLS} || "ipv4,ipv6";
-}
-
-sub import {
-   shift;
-   return unless @_;
-
-   my $pkg = caller;
-
-   no strict 'refs';
-
-   for (@_) {
-      *{"$pkg\::WIN32"} = *WIN32 if $_ eq "WIN32";
-   }
 }
 
 my @models = (
