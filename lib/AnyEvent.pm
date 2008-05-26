@@ -314,7 +314,8 @@ becomes true.
 
 After creation, the condition variable is "false" until it becomes "true"
 by calling the C<send> method (or calling the condition variable as if it
-were a callback).
+were a callback, read about the caveats in the description for the C<<
+->send >> method).
 
 Condition variables are similar to callbacks, except that you can
 optionally wait for them. They can also be called merge points - points
@@ -396,8 +397,14 @@ immediately from within send.
 Any arguments passed to the C<send> call will be returned by all
 future C<< ->recv >> calls.
 
-Condition variables are overloaded so one can call them directly (as a
-code reference). Calling them directly is the same as calling C<send>.
+Condition variables are overloaded so one can call them directly
+(as a code reference). Calling them directly is the same as calling
+C<send>. Note, however, that many C-based event loops do not handle
+overloading, so as tempting as it may be, passing a condition variable
+instead of a callback does not work. Both the pure perl and EV loops
+support overloading, however, as well as all functions that use perl to
+invoke a callback (as in L<AnyEvent::Socket> and L<AnyEvent::DNS> for
+example).
 
 =item $cv->croak ($error)
 
@@ -614,17 +621,34 @@ If it doesn't care, it can just "use AnyEvent" and use it itself, or not
 do anything special (it does not need to be event-based) and let AnyEvent
 decide which implementation to chose if some module relies on it.
 
-If the main program relies on a specific event model. For example, in
-Gtk2 programs you have to rely on the Glib module. You should load the
+If the main program relies on a specific event model - for example, in
+Gtk2 programs you have to rely on the Glib module - you should load the
 event module before loading AnyEvent or any module that uses it: generally
 speaking, you should load it as early as possible. The reason is that
 modules might create watchers when they are loaded, and AnyEvent will
 decide on the event model to use as soon as it creates watchers, and it
 might chose the wrong one unless you load the correct one yourself.
 
-You can chose to use a rather inefficient pure-perl implementation by
-loading the C<AnyEvent::Impl::Perl> module, which gives you similar
-behaviour everywhere, but letting AnyEvent chose is generally better.
+You can chose to use a pure-perl implementation by loading the
+C<AnyEvent::Impl::Perl> module, which gives you similar behaviour
+everywhere, but letting AnyEvent chose the model is generally better.
+
+=head2 MAINLOOP EMULATION
+
+Sometimes (often for short test scripts, or even standalone programs who
+only want to use AnyEvent), you do not want to run a specific event loop.
+
+In that case, you can use a condition variable like this:
+
+   AnyEvent->condvar->recv;
+
+This has the effect of entering the event loop and looping forever.
+
+Note that usually your program has some exit condition, in which case
+it is better to use the "traditional" approach of storing a condition
+variable somewhere, waiting for it, and sending it when the program should
+exit cleanly.
+
 
 =head1 OTHER MODULES
 
@@ -650,13 +674,13 @@ Provides various utility functions for (internet protocol) sockets,
 addresses and name resolution. Also functions to create non-blocking tcp
 connections or tcp servers, with IPv6 and SRV record support and more.
 
-=item L<AnyEvent::HTTPD>
-
-Provides a simple web application server framework.
-
 =item L<AnyEvent::DNS>
 
 Provides rich asynchronous DNS resolver capabilities.
+
+=item L<AnyEvent::HTTPD>
+
+Provides a simple web application server framework.
 
 =item L<AnyEvent::FastPing>
 
@@ -709,36 +733,59 @@ use strict;
 
 use Carp;
 
-our $VERSION = '4.03';
+our $VERSION = '4.04';
 our $MODEL;
 
 our $AUTOLOAD;
 our @ISA;
 
-our $verbose = $ENV{PERL_ANYEVENT_VERBOSE}*1;
-
 our @REGISTRY;
 
-our %PROTOCOL; # (ipv4|ipv6) => (1|2)
+our $WIN32;
+
+BEGIN {
+   my $win32 = ! ! ($^O =~ /mswin32/i);
+   eval "sub WIN32(){ $win32 }";
+}
+
+our $verbose = $ENV{PERL_ANYEVENT_VERBOSE}*1;
+
+our %PROTOCOL; # (ipv4|ipv6) => (1|2), higher numbers are preferred
 
 {
    my $idx;
    $PROTOCOL{$_} = ++$idx
-      for split /\s*,\s*/, $ENV{PERL_ANYEVENT_PROTOCOLS} || "ipv4,ipv6";
+      for reverse split /\s*,\s*/,
+             $ENV{PERL_ANYEVENT_PROTOCOLS} || "ipv4,ipv6";
+}
+
+sub import {
+   shift;
+   return unless @_;
+
+   my $pkg = caller;
+
+   no strict 'refs';
+
+   for (@_) {
+      *{"$pkg\::WIN32"} = *WIN32 if $_ eq "WIN32";
+   }
 }
 
 my @models = (
    [EV::                   => AnyEvent::Impl::EV::],
    [Event::                => AnyEvent::Impl::Event::],
-   [Tk::                   => AnyEvent::Impl::Tk::],
-   [Wx::                   => AnyEvent::Impl::POE::],
-   [Prima::                => AnyEvent::Impl::POE::],
    [AnyEvent::Impl::Perl:: => AnyEvent::Impl::Perl::],
-   # everything below here will not be autoprobed as the pureperl backend should work everywhere
-   [Glib::                 => AnyEvent::Impl::Glib::],
+   # everything below here will not be autoprobed
+   # as the pureperl backend should work everywhere
+   # and is usually faster
+   [Tk::                   => AnyEvent::Impl::Tk::],       # crashes with many handles
+   [Glib::                 => AnyEvent::Impl::Glib::],     # becomes extremely slow with many watchers
    [Event::Lib::           => AnyEvent::Impl::EventLib::], # too buggy
    [Qt::                   => AnyEvent::Impl::Qt::],       # requires special main program
    [POE::Kernel::          => AnyEvent::Impl::POE::],      # lasciate ogni speranza
+   [Wx::                   => AnyEvent::Impl::POE::],
+   [Prima::                => AnyEvent::Impl::POE::],
 );
 
 our %method = map +($_ => 1), qw(io timer signal child condvar one_event DESTROY);
@@ -768,6 +815,7 @@ sub AnyEvent::Util::PostDetect::DESTROY {
 sub detect() {
    unless ($MODEL) {
       no strict 'refs';
+      local $SIG{__DIE__};
 
       if ($ENV{PERL_ANYEVENT_MODEL} =~ /^([a-zA-Z]+)$/) {
          my $model = "AnyEvent::Impl::$1";
@@ -900,7 +948,7 @@ sub child {
    $PID_CB{$pid}{$arg{cb}} = $arg{cb};
 
    unless ($WNOHANG) {
-      $WNOHANG = eval { require POSIX; &POSIX::WNOHANG } || 1;
+      $WNOHANG = eval { local $SIG{__DIE__}; require POSIX; &POSIX::WNOHANG } || 1;
    }
 
    unless ($CHLD_W) {

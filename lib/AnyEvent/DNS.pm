@@ -7,7 +7,7 @@ AnyEvent::DNS - fully asynchronous DNS resolution
  use AnyEvent::DNS;
 
  my $cv = AnyEvent->condvar;
- AnyEvent::DNS::a "www.google.de", sub { $cv->send (@_) };
+ AnyEvent::DNS::a "www.google.de", $cv;
  # ... later
  my @addrs = $cv->recv;
 
@@ -31,7 +31,12 @@ package AnyEvent::DNS;
 no warnings;
 use strict;
 
+use Socket qw(AF_INET SOCK_DGRAM SOCK_STREAM);
+
+use AnyEvent qw(WIN32);
 use AnyEvent::Handle ();
+
+our @DNS_FALLBACK = (v208.67.220.220, v208.67.222.222);
 
 =item AnyEvent::DNS::addr $node, $service, $proto, $family, $type, $cb->([$family, $type, $proto, $sockaddr], ...)
 
@@ -215,7 +220,7 @@ sub addr($$$$$$) {
    $family ||=6 unless $AnyEvent::PROTOCOL{ipv4};
 
    $proto ||= "tcp";
-   $type  ||= $proto eq "udp" ? Socket::SOCK_DGRAM : Socket::SOCK_STREAM;
+   $type  ||= $proto eq "udp" ? SOCK_DGRAM : SOCK_STREAM;
 
    my $proton = (getprotobyname $proto)[2]
       or Carp::croak "$proto: protocol unknown";
@@ -240,7 +245,7 @@ sub addr($$$$$$) {
          $cb->(
             map $_->[2],
             sort {
-               $AnyEvent::PROTOCOL{$a->[1]} <=> $AnyEvent::PROTOCOL{$b->[1]}
+               $AnyEvent::PROTOCOL{$b->[1]} <=> $AnyEvent::PROTOCOL{$a->[1]}
                   or $a->[0] <=> $b->[0]
             }
             @res
@@ -253,7 +258,7 @@ sub addr($$$$$$) {
 
          if (my $noden = AnyEvent::Socket::parse_ip ($node)) {
             if (4 == length $noden && $family != 6) {
-               push @res, [$idx, "ipv4", [Socket::AF_INET, $type, $proton,
+               push @res, [$idx, "ipv4", [AF_INET, $type, $proton,
                            AnyEvent::Socket::pack_sockaddr ($port, $noden)]]
             }
 
@@ -266,7 +271,7 @@ sub addr($$$$$$) {
             if ($family != 6) {
                $cv->begin;
                a $node, sub {
-                  push @res, [$idx, "ipv4", [Socket::AF_INET, $type, $proton,
+                  push @res, [$idx, "ipv4", [AF_INET, $type, $proton,
                               AnyEvent::Socket::pack_sockaddr ($port, AnyEvent::Socket::parse_ipv4 ($_))]]
                      for @_;
                   $cv->end;
@@ -412,12 +417,12 @@ our %class_id = (
 our %class_str = reverse %class_id;
 
 # names MUST have a trailing dot
-sub _enc_qname($) {
-   pack "(C/a)*", (split /\./, shift), ""
+sub _enc_name($) {
+   pack "(C/a*)*", (split /\./, shift), ""
 }
 
 sub _enc_qd() {
-   (_enc_qname $_->[0]) . pack "nn",
+   (_enc_name $_->[0]) . pack "nn",
      ($_->[1] > 0 ? $_->[1] : $type_id {$_->[1]}),
      ($_->[2] > 0 ? $_->[2] : $class_id{$_->[2] || "in"})
 }
@@ -495,7 +500,7 @@ our $ofs;
 our $pkt;
 
 # bitches
-sub _dec_qname {
+sub _dec_name {
    my @res;
    my $redir;
    my $ptr = $ofs;
@@ -506,7 +511,7 @@ sub _dec_qname {
 
       my $len = ord substr $pkt, $ptr++, 1;
 
-      if ($len & 0xc0) {
+      if ($len >= 0xc0) {
          $ptr++;
          $ofs = $ptr if $ptr > $ofs;
          $ptr = (unpack "n", substr $pkt, $ptr - 2, 2) & 0x3fff;
@@ -521,39 +526,39 @@ sub _dec_qname {
 }
 
 sub _dec_qd {
-   my $qname = _dec_qname;
+   my $qname = _dec_name;
    my ($qt, $qc) = unpack "nn", substr $pkt, $ofs; $ofs += 4;
    [$qname, $type_str{$qt} || $qt, $class_str{$qc} || $qc]
 }
 
 our %dec_rr = (
-     1 => sub { join ".", unpack "C4" }, # a
-     2 => sub { local $ofs = $ofs - length; _dec_qname }, # ns
-     5 => sub { local $ofs = $ofs - length; _dec_qname }, # cname
+     1 => sub { join ".", unpack "C4", $_ }, # a
+     2 => sub { local $ofs = $ofs - length; _dec_name }, # ns
+     5 => sub { local $ofs = $ofs - length; _dec_name }, # cname
      6 => sub { 
              local $ofs = $ofs - length;
-             my $mname = _dec_qname;
-             my $rname = _dec_qname;
+             my $mname = _dec_name;
+             my $rname = _dec_name;
              ($mname, $rname, unpack "NNNNN", substr $pkt, $ofs)
           }, # soa
-    11 => sub { ((join ".", unpack "C4"), unpack "C a*", substr $_, 4) }, # wks
-    12 => sub { local $ofs = $ofs - length; _dec_qname }, # ptr
-    13 => sub { unpack "C/a C/a", $_ }, # hinfo
-    15 => sub { local $ofs = $ofs + 2 - length; ((unpack "n", $_), _dec_qname) }, # mx
-    16 => sub { unpack "(C/a)*", $_ }, # txt
+    11 => sub { ((join ".", unpack "C4", $_), unpack "C a*", substr $_, 4) }, # wks
+    12 => sub { local $ofs = $ofs - length; _dec_name }, # ptr
+    13 => sub { unpack "C/a* C/a*", $_ }, # hinfo
+    15 => sub { local $ofs = $ofs + 2 - length; ((unpack "n", $_), _dec_name) }, # mx
+    16 => sub { unpack "(C/a*)*", $_ }, # txt
     28 => sub { AnyEvent::Socket::format_ip ($_) }, # aaaa
-    33 => sub { local $ofs = $ofs + 6 - length; ((unpack "nnn", $_), _dec_qname) }, # srv
-    99 => sub { unpack "(C/a)*", $_ }, # spf
+    33 => sub { local $ofs = $ofs + 6 - length; ((unpack "nnn", $_), _dec_name) }, # srv
+    99 => sub { unpack "(C/a*)*", $_ }, # spf
 );
 
 sub _dec_rr {
-   my $qname = _dec_qname;
+   my $name = _dec_name;
 
    my ($rt, $rc, $ttl, $rdlen) = unpack "nn N n", substr $pkt, $ofs; $ofs += 10;
    local $_ = substr $pkt, $ofs, $rdlen; $ofs += $rdlen;
 
    [
-      $qname,
+      $name,
       $type_str{$rt}  || $rt,
       $class_str{$rc} || $rc,
       ($dec_rr{$rt} || sub { $_ })->(),
@@ -739,13 +744,13 @@ immediately.
 sub new {
    my ($class, %arg) = @_;
 
-   socket my $fh, &Socket::AF_INET, &Socket::SOCK_DGRAM, 0
+   socket my $fh, AF_INET, &Socket::SOCK_DGRAM, 0
       or Carp::croak "socket: $!";
 
    AnyEvent::Util::fh_nonblocking $fh, 1;
 
    my $self = bless {
-      server  => [v127.0.0.1],
+      server  => [],
       timeout => [2, 5, 5],
       search  => [],
       ndots   => 1,
@@ -834,36 +839,49 @@ egregious hacks on windows to force the DNS servers and searchlist out of the sy
 sub os_config {
    my ($self) = @_;
 
-   if ($^O =~ /mswin32|cygwin/i) {
-      # yeah, it suxx... lets hope DNS is DNS in all locales
+   $self->{server} = [];
+   $self->{search} = [];
+
+   if (WIN32 || $^O =~ /cygwin/i) {
+      no strict 'refs';
+
+      # there are many options to find the current nameservers etc. on windows
+      # all of them don't work consistently:
+      # - the registry thing needs separate code on win32 native vs. cygwin
+      # - the registry layout differs between windows versions
+      # - calling windows api functions doesn't work on cygwin
+      # - ipconfig uses locale-specific messages
+
+      # we use ipconfig parsing because, despite all it's brokenness,
+      # it seems most stable in practise.
+      # for good measure, we append a fallback nameserver to our list.
 
       if (open my $fh, "ipconfig /all |") {
-         delete $self->{server};
-         delete $self->{search};
+         # parsing strategy: we go through the output and look for
+         # :-lines with DNS in them. everything in those is regarded as
+         # either a nameserver (if it parses as an ip address), or a suffix
+         # (all else).
 
+         my $dns;
          while (<$fh>) {
-            # first DNS.* is suffix list
-            if (/^\s*DNS/) {
-               while (/\s+([[:alnum:].\-]+)\s*$/) {
-                  push @{ $self->{search} }, $1;
-                  $_ = <$fh>;
+            if (s/^\s.*\bdns\b.*://i) {
+               $dns = 1;
+            } elsif (/^\S/ || /^\s[^:]{16,}: /) {
+               $dns = 0;
+            }
+            if ($dns && /^\s*(\S+)\s*$/) {
+               my $s = $1;
+               $s =~ s/%\d+(?!\S)//; # get rid of scope id
+               if (my $ipn = AnyEvent::Socket::parse_ip ($s)) {
+                  push @{ $self->{server} }, $ipn;
+               } else {
+                  push @{ $self->{search} }, $s;
                }
-               last;
             }
          }
 
-         while (<$fh>) {
-            # second DNS.* is server address list
-            if (/^\s*DNS/) {
-               while (/\s+(\d+\.\d+\.\d+\.\d+)\s*$/) {
-                  my $ipn = AnyEvent::Socket::parse_ip ("$1"); # "" is necessary here, apparently
-                  push @{ $self->{server} }, $ipn
-                     if $ipn;
-                  $_ = <$fh>;
-               }
-               last;
-            }
-         }
+         # always add one fallback server
+         push @{ $self->{server} }, $DNS_FALLBACK[rand @DNS_FALLBACK];
 
          $self->_compile;
       }
@@ -879,6 +897,16 @@ sub os_config {
 
 sub _compile {
    my $self = shift;
+
+   # we currently throw away all ipv6 nameservers, we do not yet support those
+
+   my %search; $self->{search} = [grep 0 <  length, grep !$search{$_}++, @{ $self->{search} }];
+   my %server; $self->{server} = [grep 4 == length, grep !$server{$_}++, @{ $self->{server} }];
+
+   unless (@{ $self->{server} }) {
+      # use 127.0.0.1 by default, and one opendns nameserver as fallback
+      $self->{server} = [v127.0.0.1, $DNS_FALLBACK[rand @DNS_FALLBACK]];
+   }
 
    my @retry;
 
@@ -908,6 +936,8 @@ sub _feed {
 sub _recv {
    my ($self) = @_;
 
+   # we ignore errors (often one gets port unreachable, but there is
+   # no good way to take advantage of that.
    while (my $peer = recv $self->{fh}, my $res, 4096, 0) {
       my ($port, $host) = AnyEvent::Socket::unpack_sockaddr ($peer);
 

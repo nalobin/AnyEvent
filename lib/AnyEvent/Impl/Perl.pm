@@ -76,9 +76,11 @@ use strict;
 use Time::HiRes ();
 use Scalar::Util ();
 
-use AnyEvent ();
+use AnyEvent qw(WIN32);
 
 BEGIN {
+   local $SIG{__DIE__};
+
    if (0 < eval "&Time::HiRes::clock_gettime (&Time::HiRes::CLOCK_MONOTONIC)") {
       *clock = sub { &Time::HiRes::clock_gettime (&Time::HiRes::CLOCK_MONOTONIC) };
       warn "AnyEvent::Impl::Perl using CLOCK_MONOTONIC as timebase.\n" if $AnyEvent::verbose >= 8;
@@ -129,10 +131,13 @@ sub one_event {
       if ($fds = select
             $vec[0] = $fds[0]{v},
             $vec[1] = $fds[1]{v},
-            undef,
+            WIN32 ? $vec[2] = $fds[1]{v} : undef,
             @timer ? $timer[0][0] - $NOW  + 0.0009 : 3600
       ) {
          $NOW = clock;
+
+         # buggy microshit windows errornously sets exceptfds instead of writefds
+         $vec[1] |= $vec[2] if WIN32;
 
          # prefer write watchers, because they usually reduce
          # memory pressure.

@@ -291,7 +291,9 @@ sub _drain_wbuf {
    my ($self) = @_;
 
    if (!$self->{ww} && length $self->{wbuf}) {
+
       Scalar::Util::weaken $self;
+
       my $cb = sub {
          my $len = syswrite $self->{fh}, $self->{wbuf};
 
@@ -308,9 +310,12 @@ sub _drain_wbuf {
          }
       };
 
-      $self->{ww} = AnyEvent->io (fh => $self->{fh}, poll => "w", cb => $cb);
+      # try to write data immediately
+      $cb->();
 
-      $cb->($self);
+      # if still data left in wbuf, we need to poll
+      $self->{ww} = AnyEvent->io (fh => $self->{fh}, poll => "w", cb => $cb)
+         if length $self->{wbuf};
    };
 }
 
@@ -865,8 +870,8 @@ sub starttls {
    # and mismaintained ssleay-module doesn't even offer them).
    # http://www.mail-archive.com/openssl-dev@openssl.org/msg22420.html
    Net::SSLeay::CTX_set_mode ($self->{tls},
-      (eval { Net::SSLeay::MODE_ENABLE_PARTIAL_WRITE () } || 1)
-      | (eval { Net::SSLeay::MODE_ACCEPT_MOVING_WRITE_BUFFER () } || 2));
+      (eval { local $SIG{__DIE__}; Net::SSLeay::MODE_ENABLE_PARTIAL_WRITE () } || 1)
+      | (eval { local $SIG{__DIE__}; Net::SSLeay::MODE_ACCEPT_MOVING_WRITE_BUFFER () } || 2));
 
    $self->{tls_rbio} = Net::SSLeay::BIO_new (Net::SSLeay::BIO_s_mem ());
    $self->{tls_wbio} = Net::SSLeay::BIO_new (Net::SSLeay::BIO_s_mem ());

@@ -1,5 +1,21 @@
 Revision history for Perl extension AnyEvent.
 
+4.04 Mon May 26 08:03:31 CEST 2008
+	- try to work around yet another windows bug: failed connects are reported
+          as if it were out-of-band data. windows users: you suck. Only
+          EV, Glib, Event and the pure perl backend can handle this condition.
+        - optimize write algorithm in AnyEvent::Handle.
+	- properly parse PERL_ANYEVENT_PROTOCOLS and use the info correctly.
+        - tcp_connect now properly iterates through all targets.
+	- check wether IPv6 sockets can actually be created, otherwise, disable ipv6
+          support entirely. also hardcode some AF_INEt6 constants for the
+          sake of perl 5.8.
+        - vastly improved nameserver/suffix detection algorithm for windows
+          (still a hack...)
+        - try to use a fallback dns server if no dns servers could be found.
+        - splatter around some local $SIG{__DIE__}'s to work around bad
+          die handlers.
+
 4.03 Sun May 25 05:05:57 CEST 2008
 	- work around perl bugs on windows, where perl returns undocumented
           error codes for sysread, syswrite etc.
@@ -7,6 +23,7 @@ Revision history for Perl extension AnyEvent.
         - AnyEvent::Handle could sometimes stumble over 0-byte writes.
         - fix unpack_sockaddr, now works for AF_INET6 sockaddr's.
         - updated documentation.
+        - lots of workarounds for perl 5.8 quirks.
         - implement a more flexible type system for both reads and writes
           in AnyEvent::Handle.
         - support IPv6 in tcp_server.

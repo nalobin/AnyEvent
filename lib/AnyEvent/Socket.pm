@@ -40,9 +40,9 @@ use strict;
 
 use Carp ();
 use Errno ();
-use Socket ();
+use Socket qw(AF_INET SOCK_STREAM SOCK_DGRAM SOL_SOCKET SO_REUSEADDR);
 
-use AnyEvent ();
+use AnyEvent qw(WIN32);
 use AnyEvent::Util qw(guard fh_nonblocking AF_INET6);
 use AnyEvent::DNS ();
 
@@ -86,7 +86,8 @@ Tries to parse the given IPv6 address and return it in
 octet form (or undef when it isn't in a parsable format).
 
 Should support all forms specified by RFC 2373 (and additionally all IPv4
-forms supported by parse_ipv4).
+forms supported by parse_ipv4). Note that scope-id's are not supported
+(and will not parse).
 
 This function works similarly to C<inet_pton AF_INET6, ...>.
 
@@ -240,7 +241,7 @@ Handles both IPv4 and IPv6 sockaddr structures.
 sub unpack_sockaddr($) {
    my $af = unpack "S", $_[0];
 
-   if ($af == Socket::AF_INET) {
+   if ($af == AF_INET) {
       Socket::unpack_sockaddr_in $_[0]
    } elsif ($af == AF_INET6) {
       unpack "x2 n x4 a16", $_[0]
@@ -302,6 +303,15 @@ timeout is to be used).
 
 Note that the socket could be either a IPv4 TCP socket or an IPv6 TCP
 socket (although only IPv4 is currently supported by this module).
+
+Note to the poor Microsoft Windows users: Windows (of course) doesn't
+correctly signal connection errors, so unless your event library works
+around this, failed connections will simply hang. The only event libraries
+that handle this condition correctly are L<EV> and L<Glib>. Additionally,
+AnyEvent works around this bug with L<Event> and in its pure-perl
+backend. All other libraries cannot correctly handle this condition. To
+lessen the impact of this windows bug, a default timeout of 30 seconds
+will be imposed on windows. Cygwin is not affected.
 
 Simple Example: connect to localhost on port 22.
 
@@ -379,15 +389,14 @@ sub tcp_connect($$$;$) {
 
          fh_nonblocking $state{fh}, 1;
          
-         # prepare and optional timeout
-         if ($prepare) {
-            my $timeout = $prepare->($state{fh});
+         my $timeout = $prepare && $prepare->($state{fh});
 
-            $state{to} = AnyEvent->timer (after => $timeout, cb => sub {
-               $! = &Errno::ETIMEDOUT;
-               $state{next}();
-            }) if $timeout;
-         }
+         $timeout ||= 30 if WIN32;
+
+         $state{to} = AnyEvent->timer (after => $timeout, cb => sub {
+            $! = &Errno::ETIMEDOUT;
+            $state{next}();
+         }) if $timeout;
 
          # called when the connect was successful, which,
          # in theory, could be the case immediately (but never is in practise)
@@ -420,8 +429,7 @@ sub tcp_connect($$$;$) {
          } elsif ($! == &Errno::EINPROGRESS || $! == &Errno::EWOULDBLOCK) { # EINPROGRESS is POSIX
             $state{ww} = AnyEvent->io (fh => $state{fh}, poll => 'w', cb => $connected);
          } else {
-            %state = ();
-            $connect->();
+            $state{next}();
          }
       };
 
@@ -468,13 +476,16 @@ arguments.
 
 It should return the length of the listen queue (or C<0> for the default).
 
-Example: bind on TCP port 8888 on the local machine and tell each client
+Example: bind on some TCP port on the local machine and tell each client
 to go away.
 
-   tcp_server undef, 8888, sub {
+   tcp_server undef, undef, sub {
       my ($fh, $host, $port) = @_;
 
       syswrite $fh, "The internet is full, $host:$port. Go away!\015\012";
+   }, sub {
+      my ($fh, $thishost, $thisport) = @_;
+      warn "bound to $thishost, port $thisport\n";
    };
 
 =cut
@@ -482,21 +493,21 @@ to go away.
 sub tcp_server($$$;$) {
    my ($host, $port, $accept, $prepare) = @_;
 
-   $host = $AnyEvent::PROTOCOL{ipv4} > $AnyEvent::PROTOCOL{ipv6} && AF_INET6
+   $host = $AnyEvent::PROTOCOL{ipv4} < $AnyEvent::PROTOCOL{ipv6} && AF_INET6
            ? "::" : "0"
       unless defined $host;
 
    my $ipn = parse_ip $host
       or Carp::croak "AnyEvent::Socket::tcp_server: cannot parse '$host' as IPv4 or IPv6 address";
 
-   my $domain = 4 == length $ipn ? Socket::AF_INET : AF_INET6;
+   my $domain = 4 == length $ipn ? AF_INET : AF_INET6;
 
    my %state;
 
-   socket $state{fh}, $domain, &Socket::SOCK_STREAM, 0
+   socket $state{fh}, $domain, SOCK_STREAM, 0
       or Carp::croak "socket: $!";
 
-   setsockopt $state{fh}, &Socket::SOL_SOCKET, &Socket::SO_REUSEADDR, 1
+   setsockopt $state{fh}, SOL_SOCKET, SO_REUSEADDR, 1
       or Carp::croak "so_reuseaddr: $!";
 
    bind $state{fh}, pack_sockaddr _tcp_port $port, $ipn
