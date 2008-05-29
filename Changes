@@ -1,5 +1,31 @@
 Revision history for Perl extension AnyEvent.
 
+4.1  Thu May 29 05:45:40 CEST 2008
+	- INCOMPATIBLE CHANGE: renamed xxx_ip functions to xxx_address
+          which mirrors their purpose better (old names still available
+          for a while). Also moved AnyEvent::DNS::addr to
+          AnyEvent::Socket::resolve_sockaddr.
+	- implement AnyEvent->time and AnyEvent->now.
+        - fix IPv6 support in pack_sockaddr.
+	- officially un-experimentalise all newly introduced code.
+        - support unix domain sockets everywhere by specifying
+          a host of "unix/" and the pathname as service.
+        - implement an activity timeout in AnyEvent::Handle.
+	- added a regex read type to AnyEvent::Handle.
+	- added a json read/write type to AnyEvent::Handle.
+        - always croak in on_error in AnyEvent::Handle.
+        - document how to subclass AnyEvent::Handle.
+        - implement AnyEvent::Util::fork_call.
+        - add support for IPv6 nameservers and nameserver statements.
+        - work around _yet_ _another_ windows perl bug in where empty
+          select masks cause errors in the pure perl backend (this
+          workaround cannot be implemented for the other event loops,
+          but EV also works around this).
+        - supply AnyEvent::Socket::address_type and make good use of it.
+        - clarify and fix the Handle documentation w.r.t $self vs. $handle
+          vs. callback arguments.
+	- add some recommends to the META.yml.
+
 4.05 Mon May 26 19:44:06 CEST 2008
         - some platforms ignore the rfc and prepend an extra sa_len member to
           the sockaddr structure, cater for those. also use sockaddr_family,
@@ -51,7 +77,7 @@ Revision history for Perl extension AnyEvent.
         - make on_eof optional in AnyEvent::Handle.
 	- support service names in tcp_connect and tcp_server.
         - work around netbsd/openbsd bug causing unix sockets not to
-          become writable untill empty.
+          become writable until empty.
 	- only make a dummy read for error detection when getpeername
           returns ENOTCONN.
         - defend AnyEvent::Util::inet_aton against Coro::LWP brutal

@@ -77,29 +77,39 @@ use Time::HiRes ();
 use Scalar::Util ();
 
 use AnyEvent ();
+use AnyEvent::Util ();
+
+our $VERSION = 0.1;
+
+our ($NOW, $MNOW);
 
 BEGIN {
    local $SIG{__DIE__};
 
    if (0 < eval "&Time::HiRes::clock_gettime (&Time::HiRes::CLOCK_MONOTONIC)") {
-      *clock = sub { &Time::HiRes::clock_gettime (&Time::HiRes::CLOCK_MONOTONIC) };
+      *_update_clock = sub {
+         $NOW  = Time::HiRes::time;
+         $MNOW = Time::HiRes::clock_gettime (&Time::HiRes::CLOCK_MONOTONIC);
+      };
       warn "AnyEvent::Impl::Perl using CLOCK_MONOTONIC as timebase.\n" if $AnyEvent::verbose >= 8;
    } else {
-      *clock = \&Time::HiRes::time;
+      *_update_clock = sub {
+         $NOW = $MNOW = Time::HiRes::time;
+      };
       warn "AnyEvent::Impl::Perl using default (non-monotonic) clock as timebase.\n" if $AnyEvent::verbose >= 8;
    }
 }
 
-our $VERSION = 0.1;
+_update_clock;
 
-our $NOW = clock;
+sub now { $NOW }
 
 # fds[0] is for read, fds[1] is for write watchers
 # fds[poll]{v} is the bitmask for select
 # fds[poll]{w}[fd] contains a list of i/o watchers
 # an I/O watcher is a blessed arrayref containing [fh, poll(0/1), callback, queue-index]
 # the queue-index is simply the index in the {w} array, which is only used to improve
-# benchmark results in the synthetic "man watchers on one fd" benchmark.
+# benchmark results in the synthetic "many watchers on one fd" benchmark.
 my @fds = ({}, {});
 
 my $need_sort = 1e300; # when to re-sort timer list
@@ -107,20 +117,20 @@ my @timer; # list of [ abs-timeout, Timer::[callback] ]
 
 # the pure perl mainloop
 sub one_event {
-   $NOW = clock;
+   _update_clock;
 
    # first sort timers if required (slow)
-   if ($NOW >= $need_sort) {
+   if ($MNOW >= $need_sort) {
       $need_sort = 1e300;
       @timer = sort { $a->[0] <=> $b->[0] } @timer;
    }
 
    # handle all pending timers
-   if (@timer && $timer[0][0] <= $NOW) {
+   if (@timer && $timer[0][0] <= $MNOW) {
       do {
          my $timer = shift @timer;
          $timer->[1][0]() if $timer->[1];
-      } while @timer && $timer[0][0] <= $NOW;
+      } while @timer && $timer[0][0] <= $MNOW;
 
    } else {
       # poll for I/O events, we do not do this when there
@@ -132,9 +142,9 @@ sub one_event {
             $vec[0] = $fds[0]{v},
             $vec[1] = $fds[1]{v},
             AnyEvent::WIN32 ? $vec[2] = $fds[1]{v} : undef,
-            @timer ? $timer[0][0] - $NOW  + 0.0009 : 3600
+            @timer ? $timer[0][0] - $MNOW  + 0.0009 : 3600
       ) {
-         $NOW = clock;
+         _update_clock;
 
          # buggy microshit windows errornously sets exceptfds instead of writefds
          $vec[1] |= $vec[2] if AnyEvent::WIN32;
@@ -155,6 +165,9 @@ sub one_event {
                }
             }
          }
+      } elsif (AnyEvent::WIN32 && $! == AnyEvent::Util::WSAEINVAL) {
+         # buggy microshit windoze asks us to route around it
+         select undef, undef, undef, @timer ? $timer[0][0] - $MNOW  + 0.0009 : 3600;
       }
    }
 }
@@ -210,7 +223,7 @@ sub timer {
    my ($class, %arg) = @_;
    
    my $self = bless [$arg{cb}], AnyEvent::Impl::Perl::Timer::;
-   my $time = $NOW + $arg{after};
+   my $time = $MNOW + $arg{after};
 
    push @timer, [$time, $self];
    Scalar::Util::weaken $timer[-1][1];

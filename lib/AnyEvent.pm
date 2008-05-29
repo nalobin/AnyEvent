@@ -50,7 +50,7 @@ I<also> forced to use the same event loop you use.
 
 AnyEvent is different: AnyEvent + POE works fine. AnyEvent + Glib works
 fine. AnyEvent + Tk works fine etc. etc. but none of these work together
-with the rest: POE + IO::Async? no go. Tk + Event? no go. Again: if
+with the rest: POE + IO::Async? No go. Tk + Event? No go. Again: if
 your module uses one of those, every user of your module has to use it,
 too. But if your module uses AnyEvent, it works transparently with all
 event models it supports (including stuff like POE and IO::Async, as long
@@ -64,7 +64,13 @@ follow. AnyEvent, on the other hand, is lean and up to the point, by only
 offering the functionality that is necessary, in as thin as a wrapper as
 technically possible.
 
-Of course, if you want lots of policy (this can arguably be somewhat
+Of course, AnyEvent comes with a big (and fully optional!) toolbox
+of useful functionality, such as an asynchronous DNS resolver, 100%
+non-blocking connects (even with TLS/SSL, IPv6 and on broken platforms
+such as Windows) and lots of real-world knowledge and workarounds for
+platform bugs and differences.
+
+Now, if you I<do want> lots of policy (this can arguably be somewhat
 useful) and you want to force your users to use the one and only event
 model, you should I<not> use this module.
 
@@ -104,7 +110,7 @@ use AnyEvent so their modules work together with others seamlessly...
 
 The pure-perl implementation of AnyEvent is called
 C<AnyEvent::Impl::Perl>. Like other event modules you can load it
-explicitly.
+explicitly and enjoy the high availability of that event loop :)
 
 =head1 WATCHERS
 
@@ -228,6 +234,69 @@ timers.
 
 AnyEvent always prefers relative timers, if available, matching the
 AnyEvent API.
+
+AnyEvent has two additional methods that return the "current time":
+
+=over 4
+
+=item AnyEvent->time
+
+This returns the "current wallclock time" as a fractional number of
+seconds since the Epoch (the same thing as C<time> or C<Time::HiRes::time>
+return, and the result is guaranteed to be compatible with those).
+
+It progresses independently of any event loop processing, i.e. each call
+will check the system clock, which usually gets updated frequently.
+
+=item AnyEvent->now
+
+This also returns the "current wallclock time", but unlike C<time>, above,
+this value might change only once per event loop iteration, depending on
+the event loop (most return the same time as C<time>, above). This is the
+time that AnyEvent's timers get scheduled against.
+
+I<In almost all cases (in all cases if you don't care), this is the
+function to call when you want to know the current time.>
+
+This function is also often faster then C<< AnyEvent->time >>, and
+thus the preferred method if you want some timestamp (for example,
+L<AnyEvent::Handle> uses this to update it's activity timeouts).
+
+The rest of this section is only of relevance if you try to be very exact
+with your timing, you can skip it without bad conscience.
+
+For a practical example of when these times differ, consider L<Event::Lib>
+and L<EV> and the following set-up:
+
+The event loop is running and has just invoked one of your callback at
+time=500 (assume no other callbacks delay processing). In your callback,
+you wait a second by executing C<sleep 1> (blocking the process for a
+second) and then (at time=501) you create a relative timer that fires
+after three seconds.
+
+With L<Event::Lib>, C<< AnyEvent->time >> and C<< AnyEvent->now >> will
+both return C<501>, because that is the current time, and the timer will
+be scheduled to fire at time=504 (C<501> + C<3>).
+
+With L<EV>, C<< AnyEvent->time >> returns C<501> (as that is the current
+time), but C<< AnyEvent->now >> returns C<500>, as that is the time the
+last event processing phase started. With L<EV>, your timer gets scheduled
+to run at time=503 (C<500> + C<3>).
+
+In one sense, L<Event::Lib> is more exact, as it uses the current time
+regardless of any delays introduced by event processing. However, most
+callbacks do not expect large delays in processing, so this causes a
+higher drift (and a lot more system calls to get the current time).
+
+In another sense, L<EV> is more exact, as your timer will be scheduled at
+the same time, regardless of how long event processing actually took.
+
+In either case, if you care (and in most cases, you don't), then you
+can get whatever behaviour you want with any event loop, by taking the
+difference between C<< AnyEvent->time >> and C<< AnyEvent->now >> into
+account.
+
+=back
 
 =head2 SIGNAL WATCHERS
 
@@ -733,7 +802,7 @@ use strict;
 
 use Carp;
 
-our $VERSION = '4.05';
+our $VERSION = '4.1';
 our $MODEL;
 
 our $AUTOLOAD;
@@ -775,7 +844,7 @@ my @models = (
    [Prima::                => AnyEvent::Impl::POE::],
 );
 
-our %method = map +($_ => 1), qw(io timer signal child condvar one_event DESTROY);
+our %method = map +($_ => 1), qw(io timer time now signal child condvar one_event DESTROY);
 
 our @post_detect;
 
@@ -868,6 +937,13 @@ sub AUTOLOAD {
 }
 
 package AnyEvent::Base;
+
+# default implementation for now and time
+
+use Time::HiRes ();
+
+sub time { Time::HiRes::time }
+sub now  { Time::HiRes::time }
 
 # default implementation for ->condvar
 
@@ -1124,6 +1200,11 @@ default.
 
 Setting this variable to C<1> will cause L<AnyEvent::DNS> to announce
 EDNS0 in its DNS requests.
+
+=item C<PERL_ANYEVENT_MAX_FORKS>
+
+The maximum number of child processes that C<AnyEvent::Util::fork_call>
+will create in parallel.
 
 =back
 

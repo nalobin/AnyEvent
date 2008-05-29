@@ -4,11 +4,11 @@ no warnings;
 use strict;
 
 use AnyEvent ();
-use AnyEvent::Util qw(WSAWOULDBLOCK);
+use AnyEvent::Util qw(WSAEWOULDBLOCK);
 use Scalar::Util ();
 use Carp ();
 use Fcntl ();
-use Errno qw/EAGAIN EINTR/;
+use Errno qw(EAGAIN EINTR);
 
 =head1 NAME
 
@@ -16,7 +16,7 @@ AnyEvent::Handle - non-blocking I/O on file handles via AnyEvent
 
 =cut
 
-our $VERSION = '0.04';
+our $VERSION = '1.0';
 
 =head1 SYNOPSIS
 
@@ -75,7 +75,7 @@ The filehandle this L<AnyEvent::Handle> object will operate on.
 NOTE: The filehandle will be set to non-blocking (using
 AnyEvent::Util::fh_nonblocking).
 
-=item on_eof => $cb->($self)
+=item on_eof => $cb->($handle)
 
 Set the callback to be called on EOF.
 
@@ -83,7 +83,7 @@ While not mandatory, it is highly recommended to set an eof callback,
 otherwise you might end up with a closed socket while you are still
 waiting for data.
 
-=item on_error => $cb->($self)
+=item on_error => $cb->($handle)
 
 This is the fatal error callback, that is called when, well, a fatal error
 occurs, such as not being able to resolve the hostname, failure to connect
@@ -93,31 +93,54 @@ The object will not be in a usable state when this callback has been
 called.
 
 On callback entrance, the value of C<$!> contains the operating system
-error (or C<ENOSPC>, C<EPIPE> or C<EBADMSG>).
+error (or C<ENOSPC>, C<EPIPE>, C<ETIMEDOUT> or C<EBADMSG>).
+
+The callback should throw an exception. If it returns, then
+AnyEvent::Handle will C<croak> for you.
 
 While not mandatory, it is I<highly> recommended to set this callback, as
 you will not be notified of errors otherwise. The default simply calls
 die.
 
-=item on_read => $cb->($self)
+=item on_read => $cb->($handle)
 
 This sets the default read callback, which is called when data arrives
 and no read request is in the queue.
 
 To access (and remove data from) the read buffer, use the C<< ->rbuf >>
-method or access the C<$self->{rbuf}> member directly.
+method or access the C<$handle->{rbuf}> member directly.
 
 When an EOF condition is detected then AnyEvent::Handle will first try to
 feed all the remaining data to the queued callbacks and C<on_read> before
 calling the C<on_eof> callback. If no progress can be made, then a fatal
 error will be raised (with C<$!> set to C<EPIPE>).
 
-=item on_drain => $cb->()
+=item on_drain => $cb->($handle)
 
 This sets the callback that is called when the write buffer becomes empty
 (or when the callback is set and the buffer is empty already).
 
 To append to the write buffer, use the C<< ->push_write >> method.
+
+=item timeout => $fractional_seconds
+
+If non-zero, then this enables an "inactivity" timeout: whenever this many
+seconds pass without a successful read or write on the underlying file
+handle, the C<on_timeout> callback will be invoked (and if that one is
+missing, an C<ETIMEDOUT> error will be raised).
+
+Note that timeout processing is also active when you currently do not have
+any outstanding read or write requests: If you plan to keep the connection
+idle then you should disable the timout temporarily or ignore the timeout
+in the C<on_timeout> callback.
+
+Zero (the default) disables this timeout.
+
+=item on_timeout => $cb->($handle)
+
+Called whenever the inactivity timeout passes. If you return from this
+callback, then the timeout will be reset as if some activity had happened,
+so this condition is not fatal in any way.
 
 =item rbuf_max => <bytes>
 
@@ -134,7 +157,7 @@ isn't finished).
 =item read_size => <bytes>
 
 The default read block size (the amount of bytes this module will try to read
-on each [loop iteration). Default: C<4096>.
+during each (loop iteration). Default: C<8192>.
 
 =item low_water_mark => <bytes>
 
@@ -167,6 +190,22 @@ Use the given Net::SSLeay::CTX object to create the new TLS connection
 (unless a connection object was specified directly). If this parameter is
 missing, then AnyEvent::Handle will use C<AnyEvent::Handle::TLS_CTX>.
 
+=item json => JSON or JSON::XS object
+
+This is the json coder object used by the C<json> read and write types.
+
+If you don't supply it, then AnyEvent::Handle will create and use a
+suitable one, which will write and expect UTF-8 encoded JSON texts.
+
+Note that you are responsible to depend on the JSON module if you want to
+use this functionality, as AnyEvent does not have a dependency itself.
+
+=item filter_r => $cb
+
+=item filter_w => $cb
+
+These exist, but are undocumented at this time.
+
 =back
 
 =cut
@@ -185,10 +224,13 @@ sub new {
       $self->starttls (delete $self->{tls}, delete $self->{tls_ctx});
    }
 
-   $self->on_eof   (delete $self->{on_eof}  ) if $self->{on_eof};
-   $self->on_error (delete $self->{on_error}) if $self->{on_error};
+#   $self->on_eof   (delete $self->{on_eof}  ) if $self->{on_eof};   # nop
+#   $self->on_error (delete $self->{on_error}) if $self->{on_error}; # nop
+#   $self->on_read  (delete $self->{on_read} ) if $self->{on_read};  # nop
    $self->on_drain (delete $self->{on_drain}) if $self->{on_drain};
-   $self->on_read  (delete $self->{on_read} ) if $self->{on_read};
+
+   $self->{_activity} = AnyEvent->now;
+   $self->_timeout;
 
    $self->start_read;
 
@@ -198,8 +240,9 @@ sub new {
 sub _shutdown {
    my ($self) = @_;
 
-   delete $self->{rw};
-   delete $self->{ww};
+   delete $self->{_tw};
+   delete $self->{_rw};
+   delete $self->{_ww};
    delete $self->{fh};
 }
 
@@ -211,11 +254,10 @@ sub error {
       $self->_shutdown;
    }
 
-   if ($self->{on_error}) {
-      $self->{on_error}($self);
-   } else {
-      Carp::croak "AnyEvent::Handle uncaught fatal error: $!";
-   }
+   $self->{on_error}($self)
+      if $self->{on_error};
+
+   Carp::croak "AnyEvent::Handle uncaught fatal error: $!";
 }
 
 =item $fh = $handle->fh
@@ -224,7 +266,7 @@ This method returns the file handle of the L<AnyEvent::Handle> object.
 
 =cut
 
-sub fh { $_[0]->{fh} }
+sub fh { $_[0]{fh} }
 
 =item $handle->on_error ($cb)
 
@@ -244,6 +286,73 @@ Replace the current C<on_eof> callback (see the C<on_eof> constructor argument).
 
 sub on_eof {
    $_[0]{on_eof} = $_[1];
+}
+
+=item $handle->on_timeout ($cb)
+
+Replace the current C<on_timeout> callback, or disables the callback
+(but not the timeout) if C<$cb> = C<undef>. See C<timeout> constructor
+argument.
+
+=cut
+
+sub on_timeout {
+   $_[0]{on_timeout} = $_[1];
+}
+
+#############################################################################
+
+=item $handle->timeout ($seconds)
+
+Configures (or disables) the inactivity timeout.
+
+=cut
+
+sub timeout {
+   my ($self, $timeout) = @_;
+
+   $self->{timeout} = $timeout;
+   $self->_timeout;
+}
+
+# reset the timeout watcher, as neccessary
+# also check for time-outs
+sub _timeout {
+   my ($self) = @_;
+
+   if ($self->{timeout}) {
+      my $NOW = AnyEvent->now;
+
+      # when would the timeout trigger?
+      my $after = $self->{_activity} + $self->{timeout} - $NOW;
+
+      # now or in the past already?
+      if ($after <= 0) {
+         $self->{_activity} = $NOW;
+
+         if ($self->{on_timeout}) {
+            $self->{on_timeout}($self);
+         } else {
+            $! = Errno::ETIMEDOUT;
+            $self->error;
+         }
+
+         # callbakx could have changed timeout value, optimise
+         return unless $self->{timeout};
+
+         # calculate new after
+         $after = $self->{timeout};
+      }
+
+      Scalar::Util::weaken $self;
+
+      $self->{_tw} ||= AnyEvent->timer (after => $after, cb => sub {
+         delete $self->{_tw};
+         $self->_timeout;
+      });
+   } else {
+      delete $self->{_tw};
+   }
 }
 
 #############################################################################
@@ -290,7 +399,7 @@ buffers it independently of the kernel.
 sub _drain_wbuf {
    my ($self) = @_;
 
-   if (!$self->{ww} && length $self->{wbuf}) {
+   if (!$self->{_ww} && length $self->{wbuf}) {
 
       Scalar::Util::weaken $self;
 
@@ -300,12 +409,14 @@ sub _drain_wbuf {
          if ($len >= 0) {
             substr $self->{wbuf}, 0, $len, "";
 
+            $self->{_activity} = AnyEvent->now;
+
             $self->{on_drain}($self)
                if $self->{low_water_mark} >= length $self->{wbuf}
                   && $self->{on_drain};
 
-            delete $self->{ww} unless length $self->{wbuf};
-         } elsif ($! != EAGAIN && $! != EINTR && $! != WSAWOULDBLOCK) {
+            delete $self->{_ww} unless length $self->{wbuf};
+         } elsif ($! != EAGAIN && $! != EINTR && $! != WSAEWOULDBLOCK) {
             $self->error;
          }
       };
@@ -314,7 +425,7 @@ sub _drain_wbuf {
       $cb->();
 
       # if still data left in wbuf, we need to poll
-      $self->{ww} = AnyEvent->io (fh => $self->{fh}, poll => "w", cb => $cb)
+      $self->{_ww} = AnyEvent->io (fh => $self->{fh}, poll => "w", cb => $cb)
          if length $self->{wbuf};
    };
 }
@@ -336,7 +447,7 @@ sub push_write {
    }
 
    if ($self->{filter_w}) {
-      $self->{filter_w}->($self, \$_[0]);
+      $self->{filter_w}($self, \$_[0]);
    } else {
       $self->{wbuf} .= $_[0];
       $self->_drain_wbuf;
@@ -370,7 +481,48 @@ register_write_type netstring => sub {
    sprintf "%d:%s,", (length $string), $string
 };
 
-=item AnyEvent::Handle::register_write_type type => $coderef->($self, @args)
+=item json => $array_or_hashref
+
+Encodes the given hash or array reference into a JSON object. Unless you
+provide your own JSON object, this means it will be encoded to JSON text
+in UTF-8.
+
+JSON objects (and arrays) are self-delimiting, so you can write JSON at
+one end of a handle and read them at the other end without using any
+additional framing.
+
+The generated JSON text is guaranteed not to contain any newlines: While
+this module doesn't need delimiters after or between JSON texts to be
+able to read them, many other languages depend on that.
+
+A simple RPC protocol that interoperates easily with others is to send
+JSON arrays (or objects, although arrays are usually the better choice as
+they mimic how function argument passing works) and a newline after each
+JSON text:
+
+   $handle->push_write (json => ["method", "arg1", "arg2"]); # whatever
+   $handle->push_write ("\012");
+ 
+An AnyEvent::Handle receiver would simply use the C<json> read type and
+rely on the fact that the newline will be skipped as leading whitespace:
+
+   $handle->push_read (json => sub { my $array = $_[1]; ... });
+
+Other languages could read single lines terminated by a newline and pass
+this line into their JSON decoder of choice.
+
+=cut
+
+register_write_type json => sub {
+   my ($self, $ref) = @_;
+
+   require JSON;
+
+   $self->{json} ? $self->{json}->encode ($ref)
+                 : JSON::encode_json ($ref)
+};
+
+=item AnyEvent::Handle::register_write_type type => $coderef->($handle, @args)
 
 This function (not method) lets you add your own types to C<push_write>.
 Whenever the given C<type> is used, C<push_write> will invoke the code
@@ -471,7 +623,8 @@ sub _drain_rbuf {
       defined $self->{rbuf_max}
       && $self->{rbuf_max} < length $self->{rbuf}
    ) {
-      $! = &Errno::ENOSPC; return $self->error;
+      $! = &Errno::ENOSPC;
+      $self->error;
    }
 
    return if $self->{in_drain};
@@ -479,40 +632,39 @@ sub _drain_rbuf {
 
    while (my $len = length $self->{rbuf}) {
       no strict 'refs';
-      if (my $cb = shift @{ $self->{queue} }) {
+      if (my $cb = shift @{ $self->{_queue} }) {
          unless ($cb->($self)) {
-            if ($self->{eof}) {
+            if ($self->{_eof}) {
                # no progress can be made (not enough data and no data forthcoming)
-               $! = &Errno::EPIPE; return $self->error;
+               $! = &Errno::EPIPE;
+               $self->error;
             }
 
-            unshift @{ $self->{queue} }, $cb;
+            unshift @{ $self->{_queue} }, $cb;
             return;
          }
       } elsif ($self->{on_read}) {
          $self->{on_read}($self);
 
          if (
-            $self->{eof}                    # if no further data will arrive
+            $self->{_eof}                   # if no further data will arrive
             && $len == length $self->{rbuf} # and no data has been consumed
-            && !@{ $self->{queue} }         # and the queue is still empty
+            && !@{ $self->{_queue} }        # and the queue is still empty
             && $self->{on_read}             # and we still want to read data
          ) {
             # then no progress can be made
-            $! = &Errno::EPIPE; return $self->error;
+            $! = &Errno::EPIPE;
+            $self->error;
          }
       } else {
          # read side becomes idle
-         delete $self->{rw};
+         delete $self->{_rw};
          return;
       }
    }
 
-   if ($self->{eof}) {
-      $self->_shutdown;
-      $self->{on_eof}($self)
-         if $self->{on_eof};
-   }
+   $self->{on_eof}($self)
+      if $self->{_eof} && $self->{on_eof};
 }
 
 =item $handle->on_read ($cb)
@@ -584,7 +736,7 @@ sub push_read {
             ->($self, $cb, @_);
    }
 
-   push @{ $self->{queue} }, $cb;
+   push @{ $self->{_queue} }, $cb;
    $self->_drain_rbuf;
 }
 
@@ -600,7 +752,7 @@ sub unshift_read {
    }
 
 
-   unshift @{ $self->{queue} }, $cb;
+   unshift @{ $self->{_queue} }, $cb;
    $self->_drain_rbuf;
 }
 
@@ -617,7 +769,7 @@ drop by and tell us):
 
 =over 4
 
-=item chunk => $octets, $cb->($self, $data)
+=item chunk => $octets, $cb->($handle, $data)
 
 Invoke the callback only once C<$octets> bytes have been read. Pass the
 data read to the callback. The callback will never be called with less
@@ -650,7 +802,7 @@ sub unshift_read_chunk {
    $_[0]->unshift_read (chunk => $_[1], $_[2]);
 }
 
-=item line => [$eol, ]$cb->($self, $line, $eol)
+=item line => [$eol, ]$cb->($handle, $line, $eol)
 
 The callback will be called only once a full line (including the end of
 line marker, C<$eol>) has been read. This line (excluding the end of line
@@ -697,7 +849,7 @@ sub unshift_read_line {
    $self->unshift_read (line => @_);
 }
 
-=item netstring => $cb->($string)
+=item netstring => $cb->($handle, $string)
 
 A netstring (http://cr.yp.to/proto/netstrings.txt, this is not an endorsement).
 
@@ -735,9 +887,124 @@ register_read_type netstring => sub {
    }
 };
 
+=item regex => $accept[, $reject[, $skip], $cb->($handle, $data)
+
+Makes a regex match against the regex object C<$accept> and returns
+everything up to and including the match.
+
+Example: read a single line terminated by '\n'.
+
+   $handle->push_read (regex => qr<\n>, sub { ... });
+
+If C<$reject> is given and not undef, then it determines when the data is
+to be rejected: it is matched against the data when the C<$accept> regex
+does not match and generates an C<EBADMSG> error when it matches. This is
+useful to quickly reject wrong data (to avoid waiting for a timeout or a
+receive buffer overflow).
+
+Example: expect a single decimal number followed by whitespace, reject
+anything else (not the use of an anchor).
+
+   $handle->push_read (regex => qr<^[0-9]+\s>, qr<[^0-9]>, sub { ... });
+
+If C<$skip> is given and not C<undef>, then it will be matched against
+the receive buffer when neither C<$accept> nor C<$reject> match,
+and everything preceding and including the match will be accepted
+unconditionally. This is useful to skip large amounts of data that you
+know cannot be matched, so that the C<$accept> or C<$reject> regex do not
+have to start matching from the beginning. This is purely an optimisation
+and is usually worth only when you expect more than a few kilobytes.
+
+Example: expect a http header, which ends at C<\015\012\015\012>. Since we
+expect the header to be very large (it isn't in practise, but...), we use
+a skip regex to skip initial portions. The skip regex is tricky in that
+it only accepts something not ending in either \015 or \012, as these are
+required for the accept regex.
+
+   $handle->push_read (regex =>
+      qr<\015\012\015\012>,
+      undef, # no reject
+      qr<^.*[^\015\012]>,
+      sub { ... });
+
+=cut
+
+register_read_type regex => sub {
+   my ($self, $cb, $accept, $reject, $skip) = @_;
+
+   my $data;
+   my $rbuf = \$self->{rbuf};
+
+   sub {
+      # accept
+      if ($$rbuf =~ $accept) {
+         $data .= substr $$rbuf, 0, $+[0], "";
+         $cb->($self, $data);
+         return 1;
+      }
+      
+      # reject
+      if ($reject && $$rbuf =~ $reject) {
+         $! = &Errno::EBADMSG;
+         $self->error;
+      }
+
+      # skip
+      if ($skip && $$rbuf =~ $skip) {
+         $data .= substr $$rbuf, 0, $+[0], "";
+      }
+
+      ()
+   }
+};
+
+=item json => $cb->($handle, $hash_or_arrayref)
+
+Reads a JSON object or array, decodes it and passes it to the callback.
+
+If a C<json> object was passed to the constructor, then that will be used
+for the final decode, otherwise it will create a JSON coder expecting UTF-8.
+
+This read type uses the incremental parser available with JSON version
+2.09 (and JSON::XS version 2.2) and above. You have to provide a
+dependency on your own: this module will load the JSON module, but
+AnyEvent does not depend on it itself.
+
+Since JSON texts are fully self-delimiting, the C<json> read and write
+types are an ideal simple RPC protocol: just exchange JSON datagrams. See
+the C<json> write type description, above, for an actual example.
+
+=cut
+
+register_read_type json => sub {
+   my ($self, $cb, $accept, $reject, $skip) = @_;
+
+   require JSON;
+
+   my $data;
+   my $rbuf = \$self->{rbuf};
+
+   my $json = $self->{json} ||= JSON->new->utf8;
+
+   sub {
+      my $ref = $json->incr_parse ($self->{rbuf});
+
+      if ($ref) {
+         $self->{rbuf} = $json->incr_text;
+         $json->incr_text = "";
+         $cb->($self, $ref);
+
+         1
+      } else {
+         $self->{rbuf} = "";
+         ()
+      }
+   }
+};
+
 =back
 
-=item AnyEvent::Handle::register_read_type type => $coderef->($self, $cb, @args)
+=item AnyEvent::Handle::register_read_type type => $coderef->($handle, $cb, @args)
 
 This function (not method) lets you add your own types to C<push_read>.
 
@@ -749,7 +1016,7 @@ The code reference is supposed to return a callback (usually a closure)
 that works as a plain read callback (see C<< ->push_read ($cb) >>).
 
 It should invoke the passed callback when it is done reading (remember to
-pass C<$self> as first argument as all other callbacks do that).
+pass C<$handle> as first argument as all other callbacks do that).
 
 Note that this is a function, and all types registered this way will be
 global, so try to use unique names.
@@ -771,30 +1038,32 @@ C<start_read>.
 sub stop_read {
    my ($self) = @_;
 
-   delete $self->{rw};
+   delete $self->{_rw};
 }
 
 sub start_read {
    my ($self) = @_;
 
-   unless ($self->{rw} || $self->{eof}) {
+   unless ($self->{_rw} || $self->{_eof}) {
       Scalar::Util::weaken $self;
 
-      $self->{rw} = AnyEvent->io (fh => $self->{fh}, poll => "r", cb => sub {
+      $self->{_rw} = AnyEvent->io (fh => $self->{fh}, poll => "r", cb => sub {
          my $rbuf = $self->{filter_r} ? \my $buf : \$self->{rbuf};
          my $len = sysread $self->{fh}, $$rbuf, $self->{read_size} || 8192, length $$rbuf;
 
          if ($len > 0) {
+            $self->{_activity} = AnyEvent->now;
+
             $self->{filter_r}
-               ? $self->{filter_r}->($self, $rbuf)
+               ? $self->{filter_r}($self, $rbuf)
                : $self->_drain_rbuf;
 
          } elsif (defined $len) {
-            delete $self->{rw};
-            $self->{eof} = 1;
+            delete $self->{_rw};
+            $self->{_eof} = 1;
             $self->_drain_rbuf;
 
-         } elsif ($! != EAGAIN && $! != EINTR && $! != &AnyEvent::Util::WSAWOULDBLOCK) {
+         } elsif ($! != EAGAIN && $! != EINTR && $! != WSAEWOULDBLOCK) {
             return $self->error;
          }
       });
@@ -804,13 +1073,13 @@ sub start_read {
 sub _dotls {
    my ($self) = @_;
 
-   if (length $self->{tls_wbuf}) {
-      while ((my $len = Net::SSLeay::write ($self->{tls}, $self->{tls_wbuf})) > 0) {
-         substr $self->{tls_wbuf}, 0, $len, "";
+   if (length $self->{_tls_wbuf}) {
+      while ((my $len = Net::SSLeay::write ($self->{tls}, $self->{_tls_wbuf})) > 0) {
+         substr $self->{_tls_wbuf}, 0, $len, "";
       }
    }
 
-   if (defined (my $buf = Net::SSLeay::BIO_read ($self->{tls_wbio}))) {
+   if (defined (my $buf = Net::SSLeay::BIO_read ($self->{_wbio}))) {
       $self->{wbuf} .= $buf;
       $self->_drain_wbuf;
    }
@@ -846,6 +1115,10 @@ C<"connect">, C<"accept"> or an existing Net::SSLeay object).
 The second argument is the optional C<Net::SSLeay::CTX> object that is
 used when AnyEvent::Handle has to create its own TLS connection object.
 
+The TLS connection object will end up in C<< $handle->{tls} >> after this
+call and can be used or changed to your liking. Note that the handshake
+might have already started when this function returns.
+
 =cut
 
 # TODO: maybe document...
@@ -873,17 +1146,17 @@ sub starttls {
       (eval { local $SIG{__DIE__}; Net::SSLeay::MODE_ENABLE_PARTIAL_WRITE () } || 1)
       | (eval { local $SIG{__DIE__}; Net::SSLeay::MODE_ACCEPT_MOVING_WRITE_BUFFER () } || 2));
 
-   $self->{tls_rbio} = Net::SSLeay::BIO_new (Net::SSLeay::BIO_s_mem ());
-   $self->{tls_wbio} = Net::SSLeay::BIO_new (Net::SSLeay::BIO_s_mem ());
+   $self->{_rbio} = Net::SSLeay::BIO_new (Net::SSLeay::BIO_s_mem ());
+   $self->{_wbio} = Net::SSLeay::BIO_new (Net::SSLeay::BIO_s_mem ());
 
-   Net::SSLeay::set_bio ($ssl, $self->{tls_rbio}, $self->{tls_wbio});
+   Net::SSLeay::set_bio ($ssl, $self->{_rbio}, $self->{_wbio});
 
    $self->{filter_w} = sub {
-      $_[0]{tls_wbuf} .= ${$_[1]};
+      $_[0]{_tls_wbuf} .= ${$_[1]};
       &_dotls;
    };
    $self->{filter_r} = sub {
-      Net::SSLeay::BIO_write ($_[0]{tls_rbio}, ${$_[1]});
+      Net::SSLeay::BIO_write ($_[0]{_rbio}, ${$_[1]});
       &_dotls;
    };
 }
@@ -899,9 +1172,10 @@ sub stoptls {
    my ($self) = @_;
 
    Net::SSLeay::free (delete $self->{tls}) if $self->{tls};
-   delete $self->{tls_rbio};
-   delete $self->{tls_wbio};
-   delete $self->{tls_wbuf};
+
+   delete $self->{_rbio};
+   delete $self->{_wbio};
+   delete $self->{_tls_wbuf};
    delete $self->{filter_r};
    delete $self->{filter_w};
 }
@@ -946,6 +1220,35 @@ sub TLS_CTX() {
       $TLS_CTX
    }
 }
+
+=back
+
+=head1 SUBCLASSING AnyEvent::Handle
+
+In many cases, you might want to subclass AnyEvent::Handle.
+
+To make this easier, a given version of AnyEvent::Handle uses these
+conventions:
+
+=over 4
+
+=item * all constructor arguments become object members.
+
+At least initially, when you pass a C<tls>-argument to the constructor it
+will end up in C<< $handle->{tls} >>. Those members might be changes or
+mutated later on (for example C<tls> will hold the TLS connection object).
+
+=item * other object member names are prefixed with an C<_>.
+
+All object members not explicitly documented (internal use) are prefixed
+with an underscore character, so the remaining non-C<_>-namespace is free
+for use for subclasses.
+
+=item * all members not documented here and not prefixed with an underscore
+are free to use in subclasses.
+
+Of course, new versions of AnyEvent::Handle may introduce more "public"
+member variables, but thats just life, at least it is documented.
 
 =back
 
