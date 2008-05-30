@@ -1,5 +1,26 @@
 Revision history for Perl extension AnyEvent.
 
+4.11 Fri May 30 23:42:25 CEST 2008
+        - INCOMPATIBLE CHANGE: replace ptr by real PTR lookup, provide
+          reverse_lookup and reverse_verify to replace it, support
+          v4mapped and v4compat addresses.
+	- provide more documentation for the resolver class.
+        - really replace longest run of :0: by :: in format_address,
+          also properly convert :: and ::1 again.
+        - support NAPTR record name and decode it.
+        - implement random weight sampling for SRV records, as per
+          rfc 2782.
+        - correctly abort on srv-record targets of ".".
+        - added AnyEvent::DNS::wait_for_slot.
+        - in the unlikely event of a virtual circuit connection
+          being invalidated by a delayed udp reply, AnyEvent::DNS
+          could die. this has been fixed.
+        - plug a probable memleak in the DNS vc code.
+        - use configured timeout also for VC request phase.
+        - implement timeout and max_outstanding methods
+          for resolver class.
+        - update version numbers in all modules.
+
 4.1  Thu May 29 05:45:40 CEST 2008
 	- INCOMPATIBLE CHANGE: renamed xxx_ip functions to xxx_address
           which mirrors their purpose better (old names still available

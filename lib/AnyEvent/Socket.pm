@@ -58,7 +58,7 @@ our @EXPORT = qw(
    tcp_connect
 );
 
-our $VERSION = '1.0';
+our $VERSION = 4.1;
 
 =item $ipn = parse_ipv4 $dotted_quad
 
@@ -198,7 +198,11 @@ sub format_address($) {
    if ($af == AF_INET) {
       return join ".", unpack "C4", $_[0]
    } elsif ($af == AF_INET6) {
-      if (v0.0.0.0.0.0.0.0.0.0.0.0 eq substr $_[0], 0, 12) {
+      if (v0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0 eq $_[0]) {
+         return "::";
+      } elsif (v0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.1 eq $_[0]) {
+         return "::1";
+      } elsif (v0.0.0.0.0.0.0.0.0.0.0.0 eq substr $_[0], 0, 12) {
          # v4compatible
          return "::" . format_address substr $_[0], 12;
       } elsif (v0.0.0.0.0.0.0.0.0.0.255.255 eq substr $_[0], 0, 12) {
@@ -210,9 +214,15 @@ sub format_address($) {
       } else {
          my $ip = sprintf "%x:%x:%x:%x:%x:%x:%x:%x", unpack "n8", $_[0];
 
+         # this is rather sucky, I admit
          $ip =~ s/^0:(?:0:)*(0$)?/::/
-            or $ip =~ s/(:0)+$/::/
-            or $ip =~ s/(:0)+/:/;
+            or $ip =~ s/(:0){7}$/::/ or $ip =~ s/(:0){7}/:/
+            or $ip =~ s/(:0){6}$/::/ or $ip =~ s/(:0){6}/:/
+            or $ip =~ s/(:0){5}$/::/ or $ip =~ s/(:0){5}/:/
+            or $ip =~ s/(:0){4}$/::/ or $ip =~ s/(:0){4}/:/
+            or $ip =~ s/(:0){3}$/::/ or $ip =~ s/(:0){3}/:/
+            or $ip =~ s/(:0){2}$/::/ or $ip =~ s/(:0){2}/:/
+            or $ip =~ s/(:0){1}$/::/ or $ip =~ s/(:0){1}/:/;
          return $ip
       }
    } elsif ($af == AF_UNIX) {
@@ -476,8 +486,8 @@ sub resolve_sockaddr($$$$$$) {
          @srv
             or return &$resolve;
 
-         # only srv record has "." => abort
-         $srv[0][2] ne "." || $#srv
+         # the only srv record has "." ("" here) => abort
+         $srv[0][2] ne "" || $#srv
             or return $cb->();
 
          # use srv records then

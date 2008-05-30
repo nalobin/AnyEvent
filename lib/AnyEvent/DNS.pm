@@ -16,9 +16,9 @@ AnyEvent::DNS - fully asynchronous DNS resolution
 This module offers both a number of DNS convenience functions as well
 as a fully asynchronous and high-performance pure-perl stub resolver.
 
-The stub resolver supports DNS over UDP, optional EDNS0 support for up to
-4kiB datagrams and automatically falls back to virtual circuit mode for
-large responses.
+The stub resolver supports DNS over IPv4 and IPv6, UDP and TCP, optional
+EDNS0 support for up to 4kiB datagrams and automatically falls back to
+virtual circuit mode for large responses.
 
 =head2 CONVENIENCE FUNCTIONS
 
@@ -37,7 +37,7 @@ use AnyEvent ();
 use AnyEvent::Handle ();
 use AnyEvent::Util qw(AF_INET6);
 
-our $VERSION = '1.0';
+our $VERSION = 4.1;
 
 our @DNS_FALLBACK = (v208.67.220.220, v208.67.222.222);
 
@@ -70,28 +70,46 @@ of service records.
 Each srv_rr is an array reference with the following contents: 
 C<[$priority, $weight, $transport, $target]>.
 
-They will be sorted with lowest priority, highest weight first (TODO:
-should use the RFC algorithm to reorder same-priority records for weight).
+They will be sorted with lowest priority first, then randomly
+distributed by weight as per RFC 2782.
 
 Example:
 
    AnyEvent::DNS::srv "sip", "udp", "schmorp.de", sub { ...
    # @_ = ( [10, 10, 5060, "sip1.schmorp.de" ] )
 
-=item AnyEvent::DNS::ptr $ipv4_or_6, $cb->(@hostnames)
+=item AnyEvent::DNS::ptr $domain, $cb->(@hostnames)
 
-Tries to reverse-resolve the given IPv4 or IPv6 address (in textual form)
-into it's hostname(s).
-
-Example:
-
-   AnyEvent::DNS::ptr "2001:500:2f::f", sub { print shift };
-   # => f.root-servers.net
+Tries to make a PTR lookup on the given domain. See C<reverse_lookup>
+and C<reverse_verify> if you want to resolve an IP address to a hostname
+instead.
 
 =item AnyEvent::DNS::any $domain, $cb->(@rrs)
 
 Tries to resolve the given domain and passes all resource records found to
 the callback.
+
+=item AnyEvent::DNS::reverse_lookup $ipv4_or_6, $cb->(@hostnames)
+
+Tries to reverse-resolve the given IPv4 or IPv6 address (in textual form)
+into it's hostname(s). Handles V4MAPPED and V4COMPAT IPv6 addresses
+transparently.
+
+=item AnyEvent::DNS::reverse_verify $ipv4_or_6, $cb->(@hostnames)
+
+The same as C<reverse_lookup>, but does forward-lookups to verify that
+the resolved hostnames indeed point to the address, which makes spoofing
+harder.
+
+If you want to resolve an address into a hostname, this is the preferred
+method: The DNS records could still change, but at least this function
+verified that the hostname, at one point in the past, pointed at the IP
+address you originally resolved.
+
+Example:
+
+   AnyEvent::DNS::ptr "2001:500:2f::f", sub { print shift };
+   # => f.root-servers.net
 
 =cut
 
@@ -146,27 +164,40 @@ sub srv($$$$) {
 
    # todo, ask for any and check glue records
    resolver->resolve ("_$service._$proto.$domain" => "srv", sub {
-      $cb->(map [@$_[3,4,5,6]], sort { $a->[3] <=> $b->[3] || $b->[4] <=> $a->[4] } @_);
+      my @res;
+
+      # classify by priority
+      my %pri;
+      push @{ $pri{$_->[3]} }, [ @$_[3,4,5,6] ]
+         for @_;
+
+      # order by priority
+      for my $pri (sort { $a->[0] <=> $b->[0] } keys %pri) {
+         # order by weight
+         my @rr = sort { $a->[1] <=> $b->[1] } @{ delete $pri{$pri} };
+
+         my $sum; $sum += $_->[1] for @rr;
+
+         while (@rr) {
+            my $w = int rand $sum + 1;
+            for (0 .. $#rr) {
+               if (($w -= $rr[$_][1]) <= 0) {
+                  $sum -= $rr[$_][1];
+                  push @res, splice @rr, $_, 1, ();
+                  last;
+               }
+            }
+         }
+      }
+
+      $cb->(@res);
    });
 }
 
 sub ptr($$) {
-   my ($ip, $cb) = @_;
+   my ($domain, $cb) = @_;
 
-   $ip = AnyEvent::Socket::parse_address ($ip)
-      or return $cb->();
-
-   my $af = AnyEvent::Socket::address_family ($ip);
-
-   if ($af == AF_INET) {
-      $ip = join ".", (reverse split /\./, $ip), "in-addr.arpa.";
-   } elsif ($af == AF_INET6) {
-      $ip = join ".", (reverse split //, unpack "H*", $ip), "ip6.arpa.";
-   } else {
-      return $cb->();
-   }
-
-   resolver->resolve ($ip => "ptr", sub {
+   resolver->resolve ($domain => "ptr", sub {
       $cb->(map $_->[3], @_);
    });
 }
@@ -175,6 +206,78 @@ sub any($$) {
    my ($domain, $cb) = @_;
 
    resolver->resolve ($domain => "*", $cb);
+}
+
+# convert textual ip address into reverse lookup form
+sub _munge_ptr($) {
+   my $ipn = $_[0]
+      or return;
+
+   my $ptr;
+
+   my $af = AnyEvent::Socket::address_family ($ipn);
+
+   if ($af == AF_INET6) {
+      $ipn = substr $ipn, 0, 16; # anticipate future expansion
+
+      # handle v4mapped and v4compat
+      if ($ipn =~ s/^\x00{10}(?:\xff\xff|\x00\x00)//) {
+         $af = AF_INET;
+      } else {
+         $ptr = join ".", (reverse split //, unpack "H32", $ipn), "ip6.arpa.";
+      }
+   }
+
+   if ($af == AF_INET) {
+      $ptr = join ".", (reverse unpack "C4", $ipn), "in-addr.arpa.";
+   }
+
+   $ptr
+}
+
+sub reverse_lookup($$) {
+   my ($ip, $cb) = @_;
+
+   $ip = _munge_ptr AnyEvent::Socket::parse_address ($ip)
+      or return $cb->();
+
+   resolver->resolve ($ip => "ptr", sub {
+      $cb->(map $_->[3], @_);
+   });
+}
+
+sub reverse_verify($$) {
+   my ($ip, $cb) = @_;
+   
+   my $ipn = AnyEvent::Socket::parse_address ($ip)
+      or return $cb->();
+
+   my $af = AnyEvent::Socket::address_family ($ipn);
+
+   my @res;
+   my $cnt;
+
+   my $ptr = _munge_ptr $ipn
+      or return $cb->();
+
+   $ip = AnyEvent::Socket::format_address ($ipn); # normalise into the same form
+
+   ptr $ptr, sub {
+      for my $name (@_) {
+         ++$cnt;
+         
+         # () around AF_INET to work around bug in 5.8
+         resolver->resolve ("$name." => ($af == (AF_INET) ? "a" : "aaaa"), sub {
+            for (@_) {
+               push @res, $name
+                  if $_->[3] eq $ip;
+            }
+            $cb->(@res) unless --$cnt;
+         });
+      }
+
+      $cb->() unless $cnt;
+   };
 }
 
 #################################################################################
@@ -189,7 +292,7 @@ sub any($$) {
 
 This variable decides whether dns_pack automatically enables EDNS0
 support. By default, this is disabled (C<0>), unless overridden by
-C<$ENV{PERL_ANYEVENT_EDNS0>), but when set to C<1>, AnyEvent::DNS will use
+C<$ENV{PERL_ANYEVENT_EDNS0}>, but when set to C<1>, AnyEvent::DNS will use
 EDNS0 in all requests.
 
 =cut
@@ -250,6 +353,7 @@ our %type_id = (
    txt   =>  16,
    aaaa  =>  28,
    srv   =>  33,
+   naptr =>  35, # rfc2915
    opt   =>  41,
    spf   =>  99,
    tkey  => 249,
@@ -272,7 +376,6 @@ our %class_id = (
 
 our %class_str = reverse %class_id;
 
-# names MUST have a trailing dot
 sub _enc_name($) {
    pack "(C/a*)*", (split /\./, shift), ""
 }
@@ -289,7 +392,7 @@ sub _enc_rr() {
 
 =item $pkt = AnyEvent::DNS::dns_pack $dns
 
-Packs a perl data structure into a DNS packet. Reading RFC1034 is strongly
+Packs a perl data structure into a DNS packet. Reading RFC 1035 is strongly
 recommended, then everything will be totally clear. Or maybe not.
 
 Resource records are not yet encodable.
@@ -342,14 +445,14 @@ sub dns_pack($) {
       scalar @{ $req->{qd} || [] },
       scalar @{ $req->{an} || [] },
       scalar @{ $req->{ns} || [] },
-      $EDNS0 + scalar @{ $req->{ar} || [] }, # include EDNS0 option here
+      $EDNS0 + scalar @{ $req->{ar} || [] }, # EDNS0 option included here
 
       (join "", map _enc_qd, @{ $req->{qd} || [] }),
       (join "", map _enc_rr, @{ $req->{an} || [] }),
       (join "", map _enc_rr, @{ $req->{ns} || [] }),
       (join "", map _enc_rr, @{ $req->{ar} || [] }),
 
-      ($EDNS0 ? pack "C nnNn", 0, 41, MAX_PKT, 0, 0 : "") # EDNS0, 4kiB udp payload size
+      ($EDNS0 ? pack "C nnNn", 0, 41, MAX_PKT, 0, 0 : "") # EDNS0 option
 }
 
 our $ofs;
@@ -404,6 +507,11 @@ our %dec_rr = (
     16 => sub { unpack "(C/a*)*", $_ }, # txt
     28 => sub { AnyEvent::Socket::format_address ($_) }, # aaaa
     33 => sub { local $ofs = $ofs + 6 - length; ((unpack "nnn", $_), _dec_name) }, # srv
+    35 => sub { # naptr
+       my ($order, $preference, $flags, $service, $regexp, $offset) = unpack "nn C/a* C/a* C/a* .", $_;
+       local $ofs = $ofs + $offset - length;
+       ($order, $preference, $flags, $service, $regexp, _dec_name)
+    },
     99 => sub { unpack "(C/a*)*", $_ }, # spf
 );
 
@@ -562,8 +670,9 @@ The following options are supported:
 
 =item server => [...]
 
-A list of server addresses (default: C<v127.0.0.1>) in network format (4
-octets for IPv4, 16 octets for IPv6 - not yet supported).
+A list of server addresses (default: C<v127.0.0.1>) in network format
+(i.e. as returned by C<AnyEvent::Socket::parse_address> - both IPv4 and
+IPv6 are supported).
 
 =item timeout => [...]
 
@@ -582,15 +691,16 @@ tries to resolve the name without any suffixes first.
 
 =item max_outstanding => $integer
 
-Most name servers do not handle many parallel requests very well. This option
-limits the number of outstanding requests to C<$n> (default: C<10>), that means
-if you request more than this many requests, then the additional requests will be queued
-until some other requests have been resolved.
+Most name servers do not handle many parallel requests very well. This
+option limits the number of outstanding requests to C<$integer>
+(default: C<10>), that means if you request more than this many requests,
+then the additional requests will be queued until some other requests have
+been resolved.
 
 =item reuse => $seconds
 
 The number of seconds (default: C<300>) that a query id cannot be re-used
-after a timeout. If there as no time-out then query id's can be reused
+after a timeout. If there was no time-out then query ids can be reused
 immediately.
 
 =back
@@ -615,7 +725,7 @@ sub new {
       search  => [],
       ndots   => 1,
       max_outstanding => 10,
-      reuse   => 300, # reuse id's after 5 minutes only, if possible
+      reuse   => 300,
       %arg,
       reuse_q => [],
    }, $class;
@@ -730,7 +840,7 @@ sub os_config {
       # - calling windows api functions doesn't work on cygwin
       # - ipconfig uses locale-specific messages
 
-      # we use ipconfig parsing because, despite all it's brokenness,
+      # we use ipconfig parsing because, despite all its brokenness,
       # it seems most stable in practise.
       # for good measure, we append a fallback nameserver to our list.
 
@@ -749,7 +859,7 @@ sub os_config {
             }
             if ($dns && /^\s*(\S+)\s*$/) {
                my $s = $1;
-               $s =~ s/%\d+(?!\S)//; # get rid of scope id
+               $s =~ s/%\d+(?!\S)//; # get rid of ipv6 scope id
                if (my $ipn = AnyEvent::Socket::parse_address ($s)) {
                   push @{ $self->{server} }, $ipn;
                } else {
@@ -771,6 +881,34 @@ sub os_config {
          $self->parse_resolv_conf (<$fh>);
       }
    }
+}
+
+=item $resolver->timeout ($timeout, ...)
+
+Sets the timeout values. See the C<timeout> constructor argument (and note
+that this method uses the values itself, not an array-reference).
+
+=cut
+
+sub timeout {
+   my ($self, @timeout) = @_;
+
+   $self->{timeout} = \@timeout;
+   $self->_compile;
+}
+
+=item $resolver->max_outstanding ($nrequests)
+
+Sets the maximum number of outstanding requests to C<$nrequests>. See the
+C<max_outstanding> constructor argument.
+
+=cut
+
+sub max_outstanding {
+   my ($self, $max) = @_;
+
+   $self->{max_outstanding} = $max;
+   $self->_scheduler;
 }
 
 sub _compile {
@@ -866,12 +1004,17 @@ sub _exec {
          if ($res->{tc}) {
             # success, but truncated, so use tcp
             AnyEvent::Socket::tcp_connect (AnyEvent::Socket::format_address ($server), DOMAIN_PORT, sub {
+               return unless $do_retry; # some other request could have invalidated us already
+
                my ($fh) = @_
                   or return &$do_retry;
 
-               my $handle = new AnyEvent::Handle
+               my $handle; $handle = new AnyEvent::Handle
                   fh       => $fh,
+                  timeout  => $timeout,
                   on_error => sub {
+                     undef $handle;
+                     return unless $do_retry; # some other request could have invalidated us already
                      # failure, try next
                      &$do_retry;
                   };
@@ -879,10 +1022,10 @@ sub _exec {
                $handle->push_write (pack "n/a", $req->[0]);
                $handle->push_read (chunk => 2, sub {
                   $handle->unshift_read (chunk => (unpack "n", $_[1]), sub {
+                     undef $handle;
                      $self->_feed ($_[1]);
                   });
                });
-               shutdown $fh, 1;
 
             }, sub { $timeout });
 
@@ -908,6 +1051,8 @@ sub _exec {
 sub _scheduler {
    my ($self) = @_;
 
+   no strict 'refs';
+
    $NOW = time;
 
    # first clear id reuse queue
@@ -925,28 +1070,41 @@ sub _scheduler {
          last;
       }
 
-      my $req = shift @{ $self->{queue} }
-         or last;
+      if (my $req = shift @{ $self->{queue} }) {
+         # found a request in the queue, execute it
+         while () {
+            $req->[2] = int rand 65536;
+            last unless exists $self->{id}{$req->[2]};
+         }
 
-      while () {
-         $req->[2] = int rand 65536;
-         last unless exists $self->{id}{$req->[2]};
+         ++$self->{outstanding};
+         $self->{id}{$req->[2]} = 1;
+         substr $req->[0], 0, 2, pack "n", $req->[2];
+
+         $self->_exec ($req);
+
+      } elsif (my $cb = shift @{ $self->{wait} }) {
+         # found a wait_for_slot callback, call that one first
+         $cb->($self);
+
+      } else {
+         # nothing to do, just exit
+         last;
       }
-
-      ++$self->{outstanding};
-      $self->{id}{$req->[2]} = 1;
-      substr $req->[0], 0, 2, pack "n", $req->[2];
-
-      $self->_exec ($req);
    }
 }
 
 =item $resolver->request ($req, $cb->($res))
 
-Sends a single request (a hash-ref formated as specified for
-C<dns_pack>) to the configured nameservers including
-retries. Calls the callback with the decoded response packet if a reply
-was received, or no arguments on timeout.
+This is the main low-level workhorse for sending DNS requests.
+
+This function sends a single request (a hash-ref formated as specified
+for C<dns_pack>) to the configured nameservers in turn until it gets a
+response. It handles timeouts, retries and automatically falls back to
+virtual circuit mode (TCP) when it receives a truncated reply.
+
+Calls the callback with the decoded response packet if a reply was
+received, or no arguments in case none of the servers answered.
 
 =cut
 
@@ -959,13 +1117,31 @@ sub request($$) {
 
 =item $resolver->resolve ($qname, $qtype, %options, $cb->($rcode, @rr))
 
-Queries the DNS for the given domain name C<$qname> of type C<$qtype> (a
-qtype of "*" is supported and means "any").
+Queries the DNS for the given domain name C<$qname> of type C<$qtype>.
+
+A C<$qtype> is either a numerical query type (e.g. C<1> for A records) or
+a lowercase name (you have to look at the source to see which aliases are
+supported, but all types from RFC 1035, C<aaaa>, C<srv>, C<spf> and a few
+more are known to this module). A C<$qtype> of "*" is supported and means
+"any" record type.
 
 The callback will be invoked with a list of matching result records or
 none on any error or if the name could not be found.
 
 CNAME chains (although illegal) are followed up to a length of 8.
+
+The callback will be invoked with an result code in string form (noerror,
+formerr, servfail, nxdomain, notimp, refused and so on), or numerical
+form if the result code is not supported. The remaining arguments are
+arraryefs of the form C<[$name, $type, $class, @data>], where C<$name> is
+the domain name, C<$type> a type string or number, C<$class> a class name
+and @data is resource-record-dependent data. For C<a> records, this will
+be the textual IPv4 addresses, for C<ns> or C<cname> records this will be
+a domain name, for C<txt> records these are all the strings and so on.
+
+All types mentioned in RFC 1035, C<aaaa>, C<srv>, C<naptr> and C<spf> are
+decoded. All resource records not known to this module will have
+the raw C<rdata> field as fourth entry.
 
 Note that this resolver is just a stub resolver: it requires a name server
 supporting recursive queries, will not do any recursive queries itself and
@@ -979,14 +1155,16 @@ The following options are supported:
 
 Use the given search list (which might be empty), by appending each one
 in turn to the C<$qname>. If this option is missing then the configured
-C<ndots> and C<search> define its value. If the C<$qname> ends in a dot,
-then the searchlist will be ignored.
+C<ndots> and C<search> values define its value (depending on C<ndots>, the
+empty suffix will be prepended or appended to that C<search> value). If
+the C<$qname> ends in a dot, then the searchlist will be ignored.
 
 =item accept => [$type...]
 
 Lists the acceptable result types: only result types in this set will be
 accepted and returned. The default includes the C<$qtype> and nothing
-else.
+else. If this list includes C<cname>, then CNAME-chains will not be
+followed (because you asked for the CNAME record).
 
 =item class => "class"
 
@@ -997,19 +1175,35 @@ hesiod are the only ones making sense). The default is "in", of course.
 
 Examples:
 
-   $res->resolve ("ruth.plan9.de", "a", sub {
-      warn Dumper [@_];
-   });
+   # full example, you can paste this into perl:
+   use Data::Dumper;
+   use AnyEvent::DNS;
+   AnyEvent::DNS::resolver->resolve (
+      "google.com", "*", my $cv = AnyEvent->condvar);
+   warn Dumper [$cv->recv];
 
-   [
-     [
-       'ruth.schmorp.de',
-       'a',
-       'in',
-       '129.13.162.95'
-     ]
-   ]
+   # shortened result:
+   # [
+   #   [ 'google.com', 'soa', 'in', 'ns1.google.com', 'dns-admin.google.com',
+   #     2008052701, 7200, 1800, 1209600, 300 ],
+   #   [
+   #     'google.com', 'txt', 'in',
+   #     'v=spf1 include:_netblocks.google.com ~all'
+   #   ],
+   #   [ 'google.com', 'a', 'in', '64.233.187.99' ],
+   #   [ 'google.com', 'mx', 'in', 10, 'smtp2.google.com' ],
+   #   [ 'google.com', 'ns', 'in', 'ns2.google.com' ],
+   # ]
 
+   # resolve a records:
+   $res->resolve ("ruth.plan9.de", "a", sub { warn Dumper [@_] });
+
+   # result:
+   # [
+   #   [ 'ruth.schmorp.de', 'a', 'in', '129.13.162.95' ]
+   # ]
+
+   # resolve any records, but return only a and aaaa records:
    $res->resolve ("test1.laendle", "*",
       accept => ["a", "aaaa"],
       sub {
@@ -1017,20 +1211,11 @@ Examples:
       }
    );
 
-   [
-     [
-       'test1.laendle',
-       'a',
-       'in',
-       '10.0.0.255'
-     ],
-     [
-       'test1.laendle',
-       'aaaa',
-       'in',
-       '3ffe:1900:4545:0002:0240:0000:0000:f7e1'
-     ]
-   ]
+   # result:
+   # [
+   #   [ 'test1.laendle', 'a', 'in', '10.0.0.255' ],
+   #   [ 'test1.laendle', 'aaaa', 'in', '3ffe:1900:4545:0002:0240:0000:0000:f7e1' ]
+   # ]
 
 =cut
 
@@ -1106,6 +1291,37 @@ sub resolve($%) {
    };
 
    $do_search->();
+}
+
+=item $resolver->wait_for_slot ($cb->($resolver))
+
+Wait until a free request slot is available and call the callback with the
+resolver object.
+
+A request slot is used each time a request is actually sent to the
+nameservers: There are never more than C<max_outstanding> of them.
+
+Although you can submit more requests (they will simply be queued until
+a request slot becomes available), sometimes, usually for rate-limiting
+purposes, it is useful to instead wait for a slot before generating the
+request (or simply to know when the request load is low enough so one can
+submit requests again).
+
+This is what this method does: The callback will be called when submitting
+a DNS request will not result in that request being queued. The callback
+may or may not generate any requests in response.
+
+Note that the callback will only be invoked when the request queue is
+empty, so this does not play well if somebody else keeps the request queue
+full at all times.
+
+=cut
+
+sub wait_for_slot {
+   my ($self, $cb) = @_;
+
+   push @{ $self->{wait} }, $cb;
+   $self->_scheduler;
 }
 
 use AnyEvent::Socket (); # circular dependency, so do not import anything and do it at the end
