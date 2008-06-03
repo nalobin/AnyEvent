@@ -4,7 +4,7 @@ AnyEvent::Util - various utility functions.
 
 =head1 SYNOPSIS
 
- use AnyEvent::Util;
+   use AnyEvent::Util;
 
 =head1 DESCRIPTION
 
@@ -34,7 +34,7 @@ use base 'Exporter';
 our @EXPORT = qw(fh_nonblocking guard fork_call portable_pipe);
 our @EXPORT_OK = qw(AF_INET6 WSAEWOULDBLOCK WSAEINPROGRESS WSAEINVAL WSAWOULDBLOCK);
 
-our $VERSION = 4.1;
+our $VERSION = 4.12;
 
 BEGIN {
    my $posix = 1 * eval { local $SIG{__DIE__}; require POSIX };

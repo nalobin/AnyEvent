@@ -1,5 +1,10 @@
 Revision history for Perl extension AnyEvent.
 
+4.12 Tue Jun  3 10:58:04 CEST 2008
+	- include AnyEvent::Intro, a tutorial for anyevent,
+          anyevent::socket and anyevent::handle.
+        - allow more options in on_error.
+
 4.11 Fri May 30 23:42:25 CEST 2008
         - INCOMPATIBLE CHANGE: replace ptr by real PTR lookup, provide
           reverse_lookup and reverse_verify to replace it, support
