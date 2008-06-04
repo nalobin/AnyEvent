@@ -37,7 +37,7 @@ use AnyEvent ();
 use AnyEvent::Handle ();
 use AnyEvent::Util qw(AF_INET6);
 
-our $VERSION = 4.12;
+our $VERSION = 4.13;
 
 our @DNS_FALLBACK = (v208.67.220.220, v208.67.222.222);
 
@@ -710,15 +710,6 @@ immediately.
 sub new {
    my ($class, %arg) = @_;
 
-   # try to create a ipv4 and an ipv6 socket
-   # only fail when we cnanot create either
-
-   socket my $fh4, AF_INET , &Socket::SOCK_DGRAM, 0;
-   socket my $fh6, AF_INET6, &Socket::SOCK_DGRAM, 0;
-
-   $fh4 || $fh6 
-      or Carp::croak "unable to create either an IPv6 or an IPv4 socket";
-
    my $self = bless {
       server  => [],
       timeout => [2, 5, 5],
@@ -733,9 +724,15 @@ sub new {
    # search should default to gethostname's domain
    # but perl lacks a good posix module
 
+   # try to create an ipv4 and an ipv6 socket
+   # only fail when we cannot create either
+   my $got_socket;
+
    Scalar::Util::weaken (my $wself = $self);
 
-   if ($fh4) {
+   if (socket my $fh4, AF_INET , &Socket::SOCK_DGRAM, 0) {
+      ++$got_socket;
+
       AnyEvent::Util::fh_nonblocking $fh4, 1;
       $self->{fh4} = $fh4;
       $self->{rw4} = AnyEvent->io (fh => $fh4, poll => "r", cb => sub {
@@ -745,7 +742,9 @@ sub new {
       });
    }
 
-   if ($fh6) {
+   if (AF_INET6 && socket my $fh6, AF_INET6, &Socket::SOCK_DGRAM, 0) {
+      ++$got_socket;
+
       $self->{fh6} = $fh6;
       AnyEvent::Util::fh_nonblocking $fh6, 1;
       $self->{rw6} = AnyEvent->io (fh => $fh6, poll => "r", cb => sub {
@@ -754,6 +753,9 @@ sub new {
          }
       });
    }
+
+   $got_socket
+      or Carp::croak "unable to create either an IPv4 or an IPv6 socket";
 
    $self->_compile;
 
@@ -1128,7 +1130,7 @@ more are known to this module). A C<$qtype> of "*" is supported and means
 The callback will be invoked with a list of matching result records or
 none on any error or if the name could not be found.
 
-CNAME chains (although illegal) are followed up to a length of 8.
+CNAME chains (although illegal) are followed up to a length of 10.
 
 The callback will be invoked with an result code in string form (noerror,
 formerr, servfail, nxdomain, notimp, refused and so on), or numerical
@@ -1245,7 +1247,7 @@ sub resolve($%) {
          or (undef $do_search), (undef $do_req), return $cb->();
 
       (my $name = lc "$qname." . shift @search) =~ s/\.$//;
-      my $depth = 2;
+      my $depth = 10;
 
       # advance in cname-chain
       $do_req = sub {

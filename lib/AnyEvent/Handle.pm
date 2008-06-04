@@ -16,7 +16,7 @@ AnyEvent::Handle - non-blocking I/O on file handles via AnyEvent
 
 =cut
 
-our $VERSION = 4.12;
+our $VERSION = 4.13;
 
 =head1 SYNOPSIS
 
@@ -226,15 +226,11 @@ sub new {
       $self->starttls (delete $self->{tls}, delete $self->{tls_ctx});
    }
 
-#   $self->on_eof   (delete $self->{on_eof}  ) if $self->{on_eof};   # nop
-#   $self->on_error (delete $self->{on_error}) if $self->{on_error}; # nop
-#   $self->on_read  (delete $self->{on_read} ) if $self->{on_read};  # nop
-   $self->on_drain (delete $self->{on_drain}) if $self->{on_drain};
-
    $self->{_activity} = AnyEvent->now;
    $self->_timeout;
 
-   $self->start_read;
+   $self->on_drain (delete $self->{on_drain}) if $self->{on_drain};
+   $self->on_read  (delete $self->{on_read} ) if $self->{on_read};
 
    $self
 }
@@ -341,7 +337,7 @@ sub _timeout {
             $self->_error (&Errno::ETIMEDOUT);
          }
 
-         # callbakx could have changed timeout value, optimise
+         # callback could have changed timeout value, optimise
          return unless $self->{timeout};
 
          # calculate new after
@@ -349,6 +345,7 @@ sub _timeout {
       }
 
       Scalar::Util::weaken $self;
+      return unless $self; # ->error could have destroyed $self
 
       $self->{_tw} ||= AnyEvent->timer (after => $after, cb => sub {
          delete $self->{_tw};
@@ -641,29 +638,38 @@ sub _drain_rbuf {
             }
 
             unshift @{ $self->{_queue} }, $cb;
-            return;
+            last;
          }
       } elsif ($self->{on_read}) {
          $self->{on_read}($self);
 
          if (
-            $self->{_eof}                   # if no further data will arrive
-            && $len == length $self->{rbuf} # and no data has been consumed
-            && !@{ $self->{_queue} }        # and the queue is still empty
-            && $self->{on_read}             # and we still want to read data
+            $len == length $self->{rbuf} # if no data has been consumed
+            && !@{ $self->{_queue} }     # and the queue is still empty
+            && $self->{on_read}          # but we still have on_read
          ) {
-            # then no progress can be made
-            return $self->_error (&Errno::EPIPE, 1);
+            # no further data will arrive
+            # so no progress can be made
+            return $self->_error (&Errno::EPIPE, 1)
+               if $self->{_eof};
+
+            last; # more data might arrive
          }
       } else {
          # read side becomes idle
          delete $self->{_rw};
-         return;
+         last;
       }
    }
 
    $self->{on_eof}($self)
       if $self->{_eof} && $self->{on_eof};
+
+   # may need to restart read watcher
+   unless ($self->{_rw}) {
+      $self->start_read
+         if $self->{on_read} || @{ $self->{_queue} };
+   }
 }
 
 =item $handle->on_read ($cb)
@@ -678,6 +684,7 @@ sub on_read {
    my ($self, $cb) = @_;
 
    $self->{on_read} = $cb;
+   $self->_drain_rbuf if $cb;
 }
 
 =item $handle->rbuf
@@ -1025,9 +1032,14 @@ search for C<register_read_type>)).
 =item $handle->start_read
 
 In rare cases you actually do not want to read anything from the
-socket. In this case you can call C<stop_read>. Neither C<on_read> no
+socket. In this case you can call C<stop_read>. Neither C<on_read> nor
 any queued callbacks will be executed then. To start reading again, call
 C<start_read>.
+
+Note that AnyEvent::Handle will automatically C<start_read> for you when
+you change the C<on_read> callback or push/unshift a read callback, and it
+will automatically C<stop_read> for you when neither C<on_read> is set nor
+there are any read requests in the queue.
 
 =cut
 
@@ -1069,20 +1081,29 @@ sub start_read {
 sub _dotls {
    my ($self) = @_;
 
+   my $buf;
+
    if (length $self->{_tls_wbuf}) {
       while ((my $len = Net::SSLeay::write ($self->{tls}, $self->{_tls_wbuf})) > 0) {
          substr $self->{_tls_wbuf}, 0, $len, "";
       }
    }
 
-   if (defined (my $buf = Net::SSLeay::BIO_read ($self->{_wbio}))) {
+   if (length ($buf = Net::SSLeay::BIO_read ($self->{_wbio}))) {
       $self->{wbuf} .= $buf;
       $self->_drain_wbuf;
    }
 
-   while (defined (my $buf = Net::SSLeay::read ($self->{tls}))) {
-      $self->{rbuf} .= $buf;
-      $self->_drain_rbuf;
+   while (defined ($buf = Net::SSLeay::read ($self->{tls}))) {
+      if (length $buf) {
+         $self->{rbuf} .= $buf;
+         $self->_drain_rbuf;
+      } else {
+         # let's treat SSL-eof as we treat normal EOF
+         $self->{_eof} = 1;
+         $self->_shutdown;
+         return;
+      }
    }
 
    my $err = Net::SSLeay::get_error ($self->{tls}, -1);
