@@ -34,7 +34,7 @@ use base 'Exporter';
 our @EXPORT = qw(fh_nonblocking guard fork_call portable_pipe);
 our @EXPORT_OK = qw(AF_INET6 WSAEWOULDBLOCK WSAEINPROGRESS WSAEINVAL WSAWOULDBLOCK);
 
-our $VERSION = 4.13;
+our $VERSION = 4.14;
 
 BEGIN {
    my $posix = 1 * eval { local $SIG{__DIE__}; require POSIX };
@@ -298,7 +298,14 @@ guard.
 =cut
 
 sub AnyEvent::Util::Guard::DESTROY {
-   ${$_[0]}->();
+   local $@;
+
+   eval {
+      local $SIG{__DIE__};
+      ${$_[0]}->();
+   };
+
+   warn "runtime error in AnyEvent::guard callback: $@" if $@;
 }
 
 sub AnyEvent::Util::Guard::cancel($) {

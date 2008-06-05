@@ -37,7 +37,7 @@ use AnyEvent ();
 use AnyEvent::Handle ();
 use AnyEvent::Util qw(AF_INET6);
 
-our $VERSION = 4.13;
+our $VERSION = 4.14;
 
 our @DNS_FALLBACK = (v208.67.220.220, v208.67.222.222);
 
@@ -172,7 +172,7 @@ sub srv($$$$) {
          for @_;
 
       # order by priority
-      for my $pri (sort { $a->[0] <=> $b->[0] } keys %pri) {
+      for my $pri (sort { $a <=> $b } keys %pri) {
          # order by weight
          my @rr = sort { $a->[1] <=> $b->[1] } @{ delete $pri{$pri} };
 
