@@ -16,7 +16,7 @@ AnyEvent::Handle - non-blocking I/O on file handles via AnyEvent
 
 =cut
 
-our $VERSION = 4.15;
+our $VERSION = 4.151;
 
 =head1 SYNOPSIS
 
@@ -243,6 +243,9 @@ sub new {
    $self->_timeout;
 
    $self->on_drain (delete $self->{on_drain}) if $self->{on_drain};
+
+   $self->start_read
+      if $self->{on_read};
 
    $self
 }
