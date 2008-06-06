@@ -754,6 +754,11 @@ connections or tcp servers, with IPv6 and SRV record support and more.
 
 Provides rich asynchronous DNS resolver capabilities.
 
+=item L<AnyEvent::HTTP>
+
+A simple-to-use HTTP library that is capable of making a lot of concurrent
+HTTP requests.
+
 =item L<AnyEvent::HTTPD>
 
 Provides a simple web application server framework.
@@ -809,7 +814,7 @@ use strict;
 
 use Carp;
 
-our $VERSION = 4.14;
+our $VERSION = 4.15;
 our $MODEL;
 
 our $AUTOLOAD;
@@ -1667,6 +1672,15 @@ before the first watcher gets created, e.g. with a C<BEGIN> block:
 Similar considerations apply to $ENV{PERL_ANYEVENT_VERBOSE}, as that can
 be used to probe what backend is used and gain other information (which is
 probably even less useful to an attacker than PERL_ANYEVENT_MODEL).
+
+
+=head1 BUGS
+
+Perl 5.8 has numerous memleaks that sometimes hit this module and are hard
+to work around. If you suffer from memleaks, first upgrade to Perl 5.10
+and check wether the leaks still show up. (Perl 5.10.0 has other annoying
+mamleaks, such as leaking on C<map> and C<grep> but it is usually not as
+pronounced).
 
 
 =head1 SEE ALSO

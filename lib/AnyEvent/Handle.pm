@@ -16,7 +16,7 @@ AnyEvent::Handle - non-blocking I/O on file handles via AnyEvent
 
 =cut
 
-our $VERSION = 4.14;
+our $VERSION = 4.15;
 
 =head1 SYNOPSIS
 
@@ -107,7 +107,9 @@ C<croak>.
 =item on_read => $cb->($handle)
 
 This sets the default read callback, which is called when data arrives
-and no read request is in the queue.
+and no read request is in the queue (unlike read queue callbacks, this
+callback will only be called when at least one octet of data is in the
+read buffer).
 
 To access (and remove data from) the read buffer, use the C<< ->rbuf >>
 method or access the C<$handle->{rbuf}> member directly.
@@ -166,6 +168,17 @@ during each (loop iteration). Default: C<8192>.
 Sets the amount of bytes (default: C<0>) that make up an "empty" write
 buffer: If the write reaches this size or gets even samller it is
 considered empty.
+
+=item linger => <seconds>
+
+If non-zero (default: C<3600>), then the destructor of the
+AnyEvent::Handle object will check wether there is still outstanding write
+data and will install a watcher that will write out this data. No errors
+will be reported (this mostly matches how the operating system treats
+outstanding data at socket close time).
+
+This will not work for partial TLS data that could not yet been
+encoded. This data will be lost.
 
 =item tls => "accept" | "connect" | Net::SSLeay::SSL object
 
@@ -230,7 +243,6 @@ sub new {
    $self->_timeout;
 
    $self->on_drain (delete $self->{on_drain}) if $self->{on_drain};
-   $self->on_read  (delete $self->{on_read} ) if $self->{on_read};
 
    $self
 }
@@ -478,6 +490,21 @@ register_write_type netstring => sub {
    sprintf "%d:%s,", (length $string), $string
 };
 
+=item packstring => $format, $data
+
+An octet string prefixed with an encoded length. The encoding C<$format>
+uses the same format as a Perl C<pack> format, but must specify a single
+integer only (only one of C<cCsSlLqQiInNvVjJw> is allowed, plus an
+optional C<!>, C<< < >> or C<< > >> modifier).
+
+=cut
+
+register_write_type packstring => sub {
+   my ($self, $format, $string) = @_;
+
+   pack "$format/a*", $string
+};
+
 =item json => $array_or_hashref
 
 Encodes the given hash or array reference into a JSON object. Unless you
@@ -519,6 +546,21 @@ register_write_type json => sub {
                  : JSON::encode_json ($ref)
 };
 
+=item storable => $reference
+
+Freezes the given reference using L<Storable> and writes it to the
+handle. Uses the C<nfreeze> format.
+
+=cut
+
+register_write_type storable => sub {
+   my ($self, $ref) = @_;
+
+   require Storable;
+
+   pack "w/a*", Storable::nfreeze ($ref)
+};
+
 =back
 
 =item AnyEvent::Handle::register_write_type type => $coderef->($handle, @args)
@@ -555,8 +597,8 @@ or not.
 
 In the more complex case, you want to queue multiple callbacks. In this
 case, AnyEvent::Handle will call the first queued callback each time new
-data arrives and removes it when it has done its job (see C<push_read>,
-below).
+data arrives (also the first time it is queued) and removes it when it has
+done its job (see C<push_read>, below).
 
 This way you can, for example, push three line-reads, followed by reading
 a chunk of data, and AnyEvent::Handle will execute them in order.
@@ -636,13 +678,15 @@ sub _drain_rbuf {
          unless ($cb->($self)) {
             if ($self->{_eof}) {
                # no progress can be made (not enough data and no data forthcoming)
-               return $self->_error (&Errno::EPIPE, 1);
+               $self->_error (&Errno::EPIPE, 1), last;
             }
 
             unshift @{ $self->{_queue} }, $cb;
             last;
          }
       } elsif ($self->{on_read}) {
+         last unless $len;
+
          $self->{on_read}($self);
 
          if (
@@ -652,7 +696,7 @@ sub _drain_rbuf {
          ) {
             # no further data will arrive
             # so no progress can be made
-            return $self->_error (&Errno::EPIPE, 1)
+            $self->_error (&Errno::EPIPE, 1), last
                if $self->{_eof};
 
             last; # more data might arrive
@@ -857,42 +901,6 @@ sub unshift_read_line {
    $self->unshift_read (line => @_);
 }
 
-=item netstring => $cb->($handle, $string)
-
-A netstring (http://cr.yp.to/proto/netstrings.txt, this is not an endorsement).
-
-Throws an error with C<$!> set to EBADMSG on format violations.
-
-=cut
-
-register_read_type netstring => sub {
-   my ($self, $cb) = @_;
-
-   sub {
-      unless ($_[0]{rbuf} =~ s/^(0|[1-9][0-9]*)://) {
-         if ($_[0]{rbuf} =~ /[^0-9]/) {
-            $self->_error (&Errno::EBADMSG);
-         }
-         return;
-      }
-
-      my $len = $1;
-
-      $self->unshift_read (chunk => $len, sub {
-         my $string = $_[1];
-         $_[0]->unshift_read (chunk => 1, sub {
-            if ($_[1] eq ",") {
-               $cb->($_[0], $string);
-            } else {
-               $self->_error (&Errno::EBADMSG);
-            }
-         });
-      });
-
-      1
-   }
-};
-
 =item regex => $accept[, $reject[, $skip], $cb->($handle, $data)
 
 Makes a regex match against the regex object C<$accept> and returns
@@ -963,6 +971,78 @@ register_read_type regex => sub {
    }
 };
 
+=item netstring => $cb->($handle, $string)
+
+A netstring (http://cr.yp.to/proto/netstrings.txt, this is not an endorsement).
+
+Throws an error with C<$!> set to EBADMSG on format violations.
+
+=cut
+
+register_read_type netstring => sub {
+   my ($self, $cb) = @_;
+
+   sub {
+      unless ($_[0]{rbuf} =~ s/^(0|[1-9][0-9]*)://) {
+         if ($_[0]{rbuf} =~ /[^0-9]/) {
+            $self->_error (&Errno::EBADMSG);
+         }
+         return;
+      }
+
+      my $len = $1;
+
+      $self->unshift_read (chunk => $len, sub {
+         my $string = $_[1];
+         $_[0]->unshift_read (chunk => 1, sub {
+            if ($_[1] eq ",") {
+               $cb->($_[0], $string);
+            } else {
+               $self->_error (&Errno::EBADMSG);
+            }
+         });
+      });
+
+      1
+   }
+};
+
+=item packstring => $format, $cb->($handle, $string)
+
+An octet string prefixed with an encoded length. The encoding C<$format>
+uses the same format as a Perl C<pack> format, but must specify a single
+integer only (only one of C<cCsSlLqQiInNvVjJw> is allowed, plus an
+optional C<!>, C<< < >> or C<< > >> modifier).
+
+DNS over TCP uses a prefix of C<n>, EPP uses a prefix of C<N>.
+
+Example: read a block of data prefixed by its length in BER-encoded
+format (very efficient).
+
+   $handle->push_read (packstring => "w", sub {
+      my ($handle, $data) = @_;
+   });
+
+=cut
+
+register_read_type packstring => sub {
+   my ($self, $cb, $format) = @_;
+
+   sub {
+      # when we can use 5.10 we can use ".", but for 5.8 we use the re-pack method
+      defined (my $len = eval { unpack $format, $_[0]->{rbuf} })
+         or return;
+
+      # remove prefix
+      substr $_[0]->{rbuf}, 0, (length pack $format, $len), "";
+
+      # read rest
+      $_[0]->unshift_read (chunk => $len, $cb);
+
+      1
+   }
+};
+
 =item json => $cb->($handle, $hash_or_arrayref)
 
 Reads a JSON object or array, decodes it and passes it to the callback.
@@ -982,7 +1062,7 @@ the C<json> write type description, above, for an actual example.
 =cut
 
 register_read_type json => sub {
-   my ($self, $cb, $accept, $reject, $skip) = @_;
+   my ($self, $cb) = @_;
 
    require JSON;
 
@@ -1004,6 +1084,40 @@ register_read_type json => sub {
          $self->{rbuf} = "";
          ()
       }
+   }
+};
+
+=item storable => $cb->($handle, $ref)
+
+Deserialises a L<Storable> frozen representation as written by the
+C<storable> write type (BER-encoded length prefix followed by nfreeze'd
+data).
+
+Raises C<EBADMSG> error if the data could not be decoded.
+
+=cut
+
+register_read_type storable => sub {
+   my ($self, $cb) = @_;
+
+   require Storable;
+
+   sub {
+      # when we can use 5.10 we can use ".", but for 5.8 we use the re-pack method
+      defined (my $len = eval { unpack "w", $_[0]->{rbuf} })
+         or return;
+
+      # remove prefix
+      substr $_[0]->{rbuf}, 0, (length pack "w", $len), "";
+
+      # read rest
+      $_[0]->unshift_read (chunk => $len, sub {
+         if (my $ref = eval { Storable::thaw ($_[1]) }) {
+            $cb->($_[0], $ref);
+         } else {
+            $self->_error (&Errno::EBADMSG);
+         }
+      });
    }
 };
 
@@ -1201,6 +1315,28 @@ sub DESTROY {
    my $self = shift;
 
    $self->stoptls;
+
+   my $linger = exists $self->{linger} ? $self->{linger} : 3600;
+
+   if ($linger && length $self->{wbuf}) {
+      my $fh   = delete $self->{fh};
+      my $wbuf = delete $self->{wbuf};
+
+      my @linger;
+
+      push @linger, AnyEvent->io (fh => $fh, poll => "w", cb => sub {
+         my $len = syswrite $fh, $wbuf, length $wbuf;
+
+         if ($len > 0) {
+            substr $wbuf, 0, $len, "";
+         } else {
+            @linger = (); # end
+         }
+      });
+      push @linger, AnyEvent->timer (after => $linger, cb => sub {
+         @linger = ();
+      });
+   }
 }
 
 =item AnyEvent::Handle::TLS_CTX

@@ -79,7 +79,7 @@ use Scalar::Util ();
 use AnyEvent ();
 use AnyEvent::Util ();
 
-our $VERSION = 4.14;
+our $VERSION = 4.15;
 
 our ($NOW, $MNOW);
 
@@ -213,7 +213,7 @@ sub AnyEvent::Impl::Perl::Io::DESTROY {
       my $last = pop @$q;
 
       if ($last != $self) {
-         $q->[$self->[3]] = $last;
+         Scalar::Util::weaken ($q->[$self->[3]] = $last);
          $last->[3] = $self->[3];
       }
    }
