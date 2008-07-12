@@ -41,42 +41,41 @@ our $maincontext = Glib::MainContext->default;
 sub io {
    my ($class, %arg) = @_;
    
-   my $self = bless \%arg, $class;
-   my $rcb = \$self->{cb};
+   my $cb = $arg{cb};
 
    my @cond;
    # some glibs need hup, others error with it, YMMV
-   push @cond, "in",  "hup" if $self->{poll} eq "r";
-   push @cond, "out", "hup" if $self->{poll} eq "w";
+   push @cond, "in",  "hup" if $arg{poll} eq "r";
+   push @cond, "out", "hup" if $arg{poll} eq "w";
 
-   $self->{source} = add_watch Glib::IO fileno $self->{fh}, \@cond, sub {
-      $$rcb->();
-      ! ! $$rcb
+   my $source = add_watch Glib::IO fileno $arg{fh}, \@cond, sub {
+      &$cb;
+      1
    };
 
-   $self
+   bless \\$source, $class
 }
 
 sub timer {
    my ($class, %arg) = @_;
    
-   my $self = bless \%arg, $class;
-   my $cb = $self->{cb};
+   my $cb   = $arg{cb};
+   my $ival = $arg{interval} * 1000;
 
-   $self->{source} = add Glib::Timeout $self->{after} * 1000, sub {
-      $cb->();
-      0
-   };
+   my $source; $source = add Glib::Timeout $arg{after} * 1000,
+      $ival ? sub {
+                remove Glib::Source $source;
+                $source = add Glib::Timeout $ival, sub { &$cb; 1 };
+                &$cb;
+                0
+              }
+            : sub { &$cb; 0 };
 
-   $self
+   bless \\$source, $class
 }
 
 sub DESTROY {
-   my ($self) = @_;
-
-   remove Glib::Source delete $self->{source} if $self->{source};
-   # need to undef $cb because we hold references to it
-   $self->{cb} = undef;
+   remove Glib::Source $${$_[0]};
 }
 
 sub one_event {

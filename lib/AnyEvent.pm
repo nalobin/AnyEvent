@@ -35,11 +35,12 @@ Executive Summary: AnyEvent is I<compatible>, AnyEvent is I<free of
 policy> and AnyEvent is I<small and efficient>.
 
 First and foremost, I<AnyEvent is not an event model> itself, it only
-interfaces to whatever event model the main program happens to use in a
+interfaces to whatever event model the main program happens to use, in a
 pragmatic way. For event models and certain classes of immortals alike,
 the statement "there can only be one" is a bitter reality: In general,
 only one event loop can be active at the same time in a process. AnyEvent
-helps hiding the differences between those event loops.
+cannot change this, but it can hide the differences between those event
+loops.
 
 The goal of AnyEvent is to offer module authors the ability to do event
 programming (waiting for I/O or timer events) without subscribing to a
@@ -50,18 +51,18 @@ model you use.
 For modules like POE or IO::Async (which is a total misnomer as it is
 actually doing all I/O I<synchronously>...), using them in your module is
 like joining a cult: After you joined, you are dependent on them and you
-cannot use anything else, as it is simply incompatible to everything that
-isn't itself. What's worse, all the potential users of your module are
-I<also> forced to use the same event loop you use.
+cannot use anything else, as they are simply incompatible to everything
+that isn't them. What's worse, all the potential users of your
+module are I<also> forced to use the same event loop you use.
 
 AnyEvent is different: AnyEvent + POE works fine. AnyEvent + Glib works
 fine. AnyEvent + Tk works fine etc. etc. but none of these work together
 with the rest: POE + IO::Async? No go. Tk + Event? No go. Again: if
 your module uses one of those, every user of your module has to use it,
 too. But if your module uses AnyEvent, it works transparently with all
-event models it supports (including stuff like POE and IO::Async, as long
-as those use one of the supported event loops. It is trivial to add new
-event loops to AnyEvent, too, so it is future-proof).
+event models it supports (including stuff like IO::Async, as long as those
+use one of the supported event loops. It is trivial to add new event loops
+to AnyEvent, too, so it is future-proof).
 
 In addition to being free of having to use I<the one and only true event
 model>, AnyEvent also is free of bloat and policy: with POE or similar
@@ -154,11 +155,11 @@ declared.
 You can create an I/O watcher by calling the C<< AnyEvent->io >> method
 with the following mandatory key-value pairs as arguments:
 
-C<fh> the Perl I<file handle> (I<not> file descriptor) to watch
-for events. C<poll> must be a string that is either C<r> or C<w>,
-which creates a watcher waiting for "r"eadable or "w"ritable events,
-respectively. C<cb> is the callback to invoke each time the file handle
-becomes ready.
+C<fh> the Perl I<file handle> (I<not> file descriptor) to watch for events
+(AnyEvent might or might not keep a reference to this file handle). C<poll>
+must be a string that is either C<r> or C<w>, which creates a watcher
+waiting for "r"eadable or "w"ritable events, respectively. C<cb> is the
+callback to invoke each time the file handle becomes ready.
 
 Although the callback might get passed parameters, their value and
 presence is undefined and you cannot rely on them. Portable AnyEvent
@@ -172,9 +173,9 @@ Some event loops issue spurious readyness notifications, so you should
 always use non-blocking calls when reading/writing from/to your file
 handles.
 
-Example:
+Example: wait for readability of STDIN, then read a line and disable the
+watcher.
 
-   # wait for readability of STDIN, then read a line and disable the watcher
    my $w; $w = AnyEvent->io (fh => \*STDIN, poll => 'r', cb => sub {
       chomp (my $input = <STDIN>);
       warn "read: $input\n";
@@ -194,13 +195,18 @@ Although the callback might get passed parameters, their value and
 presence is undefined and you cannot rely on them. Portable AnyEvent
 callbacks cannot use arguments passed to time watcher callbacks.
 
-The timer callback will be invoked at most once: if you want a repeating
-timer you have to create a new watcher (this is a limitation by both Tk
-and Glib).
+The callback will normally be invoked once only. If you specify another
+parameter, C<interval>, as a strictly positive number (> 0), then the
+callback will be invoked regularly at that interval (in fractional
+seconds) after the first invocation. If C<interval> is specified with a
+false value, then it is treated as if it were missing.
 
-Example:
+The callback will be rescheduled before invoking the callback, but no
+attempt is done to avoid timer drift in most backends, so the interval is
+only approximate.
 
-   # fire an event after 7.7 seconds
+Example: fire an event after 7.7 seconds.
+
    my $w = AnyEvent->timer (after => 7.7, cb => sub {
       warn "timeout\n";
    });
@@ -208,18 +214,11 @@ Example:
    # to cancel the timer:
    undef $w;
 
-Example 2:
+Example 2: fire an event after 0.5 seconds, then roughly every second.
 
-   # fire an event after 0.5 seconds, then roughly every second
-   my $w;
-
-   my $cb = sub {
-      # cancel the old timer while creating a new one
-      $w = AnyEvent->timer (after => 1, cb => $cb);
+   my $w = AnyEvent->timer (after => 0.5, interval => 1, cb => sub {
+      warn "timeout\n";
    };
-
-   # start the "loop" by creating the first watcher
-   $w = AnyEvent->timer (after => 0.5, cb => $cb);
 
 =head3 TIMING ISSUES
 
@@ -307,8 +306,8 @@ account.
 =head2 SIGNAL WATCHERS
 
 You can watch for signals using a signal watcher, C<signal> is the signal
-I<name> without any C<SIG> prefix, C<cb> is the Perl callback to
-be invoked whenever a signal occurs.
+I<name> in uppercase and without any C<SIG> prefix, C<cb> is the Perl
+callback to be invoked whenever a signal occurs.
 
 Although the callback might get passed parameters, their value and
 presence is undefined and you cannot rely on them. Portable AnyEvent
@@ -740,15 +739,17 @@ available via CPAN.
 Contains various utility functions that replace often-used but blocking
 functions such as C<inet_aton> by event-/callback-based versions.
 
-=item L<AnyEvent::Handle>
-
-Provide read and write buffers and manages watchers for reads and writes.
-
 =item L<AnyEvent::Socket>
 
 Provides various utility functions for (internet protocol) sockets,
 addresses and name resolution. Also functions to create non-blocking tcp
 connections or tcp servers, with IPv6 and SRV record support and more.
+
+=item L<AnyEvent::Handle>
+
+Provide read and write buffers, manages watchers for reads and writes,
+supports raw and formatted I/O, I/O queued and fully transparent and
+non-blocking SSL/TLS.
 
 =item L<AnyEvent::DNS>
 
@@ -769,7 +770,27 @@ The fastest ping in the west.
 
 =item L<AnyEvent::DBI>
 
-Executes DBI requests asynchronously in a proxy process.
+Executes L<DBI> requests asynchronously in a proxy process.
+
+=item L<AnyEvent::AIO>
+
+Truly asynchronous I/O, should be in the toolbox of every event
+programmer. AnyEvent::AIO transparently fuses L<IO::AIO> and AnyEvent
+together.
+
+=item L<AnyEvent::BDB>
+
+Truly asynchronous Berkeley DB access. AnyEvent::BDB transparently fuses
+L<BDB> and AnyEvent together.
+
+=item L<AnyEvent::GPSD>
+
+A non-blocking interface to gpsd, a daemon delivering GPS information.
+
+=item L<AnyEvent::IGS>
+
+A non-blocking interface to the Internet Go Server protocol (used by
+L<App::IGS>).
 
 =item L<Net::IRC3>
 
@@ -792,17 +813,6 @@ High level API for event-based execution flow control.
 
 Has special support for AnyEvent via L<Coro::AnyEvent>.
 
-=item L<AnyEvent::AIO>, L<IO::AIO>
-
-Truly asynchronous I/O, should be in the toolbox of every event
-programmer. AnyEvent::AIO transparently fuses IO::AIO and AnyEvent
-together.
-
-=item L<AnyEvent::BDB>, L<BDB>
-
-Truly asynchronous Berkeley DB access. AnyEvent::AIO transparently fuses
-IO::AIO and AnyEvent together.
-
 =item L<IO::Lambda>
 
 The lambda approach to I/O - don't ask, look there. Can use AnyEvent.
@@ -818,7 +828,7 @@ use strict;
 
 use Carp;
 
-our $VERSION = 4.161;
+our $VERSION = 4.2;
 our $MODEL;
 
 our $AUTOLOAD;
@@ -931,8 +941,11 @@ sub detect() {
          }
       }
 
-      unshift @ISA, $MODEL;
       push @{"$MODEL\::ISA"}, "AnyEvent::Base";
+
+      unshift @ISA, $MODEL;
+
+      require AnyEvent::Strict if $ENV{PERL_ANYEVENT_STRICT};
 
       (shift @post_detect)->() while @post_detect;
    }
@@ -950,6 +963,27 @@ sub AUTOLOAD {
 
    my $class = shift;
    $class->$func (@_);
+}
+
+# utility function to dup a filehandle. this is used by many backends
+# to support binding more than one watcher per filehandle (they usually
+# allow only one watcher per fd, so we dup it to get a different one).
+sub _dupfh($$$$) {
+   my ($poll, $fh, $r, $w) = @_;
+
+   require Fcntl;
+
+   # cygwin requires the fh mode to be matching, unix doesn't
+   my ($rw, $mode) = $poll eq "r" ? ($r, "<")
+                   : $poll eq "w" ? ($w, ">")
+                   : Carp::croak "AnyEvent->io requires poll set to either 'r' or 'w'";
+
+   open my $fh2, "$mode&" . fileno $fh
+      or die "cannot dup() filehandle: $!";
+
+   # we assume CLOEXEC is already set by perl in all important cases
+
+   ($fh2, $rw)
 }
 
 package AnyEvent::Base;
@@ -1169,6 +1203,19 @@ C<PERL_ANYEVENT_MODEL>.
 
 When set to C<2> or higher, cause AnyEvent to report to STDERR which event
 model it chooses.
+
+=item C<PERL_ANYEVENT_STRICT>
+
+AnyEvent does not do much argument checking by default, as thorough
+argument checking is very costly. Setting this variable to a true value
+will cause AnyEvent to load C<AnyEvent::Strict> and then to thoroughly
+check the arguments passed to most method calls. If it finds any problems
+it will croak.
+
+In other words, enables "strict" mode.
+
+Unlike C<use strict> it is definitely recommended ot keep it off in
+production.
 
 =item C<PERL_ANYEVENT_MODEL>
 
@@ -1675,7 +1722,8 @@ before the first watcher gets created, e.g. with a C<BEGIN> block:
 
 Similar considerations apply to $ENV{PERL_ANYEVENT_VERBOSE}, as that can
 be used to probe what backend is used and gain other information (which is
-probably even less useful to an attacker than PERL_ANYEVENT_MODEL).
+probably even less useful to an attacker than PERL_ANYEVENT_MODEL), and
+$ENV{PERL_ANYEGENT_STRICT}.
 
 
 =head1 BUGS

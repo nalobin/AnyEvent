@@ -26,7 +26,8 @@ so if you register a read and a write watcher for one fh, AnyEvent will
 create two additional file descriptors (and handles).
 
 This creates a high overhead and is slow, but seems to work around all
-known bugs in L<Tk::fileevent>.
+known bugs in L<Tk::fileevent> on 32 bit architectures (Tk seems to be
+terminally broken on 64 bit).
 
 To be able to access the Tk event loop, this module creates a main
 window and withdraws it immediately. This might cause flickering on some
@@ -41,21 +42,15 @@ package AnyEvent::Impl::Tk;
 no warnings;
 use strict;
 
+use AnyEvent ();
+
 use Tk ();
 
 our $mw = new MainWindow;
 $mw->withdraw;
 
 sub io {
-   my ($class, %arg) = @_;
-   
-   my $self = bless \%arg, $class;
-   my $cb = $self->{cb};
-
-   # cygwin requires the fh mode to be matching, unix doesn't
-   my ($tk, $mode) = $self->{poll} eq "r" ? ("readable", "<")
-                   : $self->{poll} eq "w" ? ("writable", ">")
-                   : Carp::croak "AnyEvent->io requires poll set to either 'r' or 'w'";
+   my (undef, %arg) = @_;
 
    # work around these bugs in Tk:
    # - removing a callback will destroy other callbacks
@@ -63,47 +58,50 @@ sub io {
    # - adding a callback might destroy other callbacks
    # - only one callback per fh
    # - only one callback per fh/poll combination
-   open $self->{fh2}, "$mode&" . fileno $self->{fh}
-      or die "cannot dup() filehandle: $!";
+   my ($fh, $tk) = AnyEvent::_dupfh $arg{poll}, $arg{fh}, "readable", "writable";
 
-   eval { local $SIG{__DIE__}; fcntl $self->{fh2}, &Fcntl::F_SETFD, &Fcntl::FD_CLOEXEC }; # eval in case paltform doesn't support it
-   
-   $mw->fileevent ($self->{fh2}, $tk => $cb);
+   $mw->fileevent ($fh, $tk => $arg{cb});
 
-   $self
+   bless [$fh, $tk], AnyEvent::Impl::Tk::Io::
+}
+
+sub AnyEvent::Impl::Tk::Io::DESTROY {
+   my ($fh, $tk) = @{$_[0]};
+
+   # work around another bug: watchers don't get removed when
+   # the fh is closed contrary to documentation. also, trying
+   # to unregister a read callback will make it impossible
+   # to remove the write callback.
+   $mw->fileevent ($fh, $tk => "");
 }
 
 sub timer {
-   my ($class, %arg) = @_;
+   my (undef, %arg) = @_;
    
-   my $self = bless \%arg, $class;
-   my $rcb = \$self->{cb};
+   my $cb = $arg{cb};
 
-   $mw->after ($self->{after} * 1000, sub {
-      $$rcb->() if $$rcb;
-   });
+   my $self = bless \\$cb, AnyEvent::Impl::Tk::Timer::;
+
+   if ($arg{interval}) {
+      my $ival = $arg{interval} * 1000;
+      my $rcb; $rcb = sub {
+         if ($cb) {
+            $mw->after ($ival, $rcb);
+            &$cb;
+         }
+      };
+      $mw->after ($arg{after} * 1000, $rcb);
+   } else {
+      $mw->after ($arg{after} * 1000, sub {
+         &$cb if $cb;
+      });
+   }
 
    $self
 }
 
-sub cancel {
-   my ($self) = @_;
-
-   if (my $fh = delete $self->{fh2}) {
-      # work around another bug: watchers don't get removed when
-      # the fh is closed contrary to documentation.
-      $mw->fileevent ($fh, readable => "");
-      $mw->fileevent ($fh, writable => "");
-   }
-
-   undef $self->{cb};
-   delete $self->{cb};
-}
-
-sub DESTROY {
-   my ($self) = @_;
-
-   $self->cancel;
+sub AnyEvent::Impl::Tk::Timer::DESTROY {
+   $${$_[0]} = undef;
 }
 
 sub one_event {

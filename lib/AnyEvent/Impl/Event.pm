@@ -24,7 +24,7 @@ use strict;
 
 use AnyEvent ();
 
-use Event ();
+use Event qw(time); # we have to important something to make Event use Time::HiRes
 
 sub io {
    my ($class, %arg) = @_;
@@ -35,7 +35,7 @@ sub io {
 
 sub timer {
    my ($class, %arg) = @_;
-   bless \Event->timer (%arg), $class
+   bless \Event->timer (%arg, repeat => $arg{interval}), $class
 }
 
 sub signal {
