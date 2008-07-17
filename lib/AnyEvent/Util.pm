@@ -34,7 +34,7 @@ use base 'Exporter';
 our @EXPORT = qw(fh_nonblocking guard fork_call portable_pipe);
 our @EXPORT_OK = qw(AF_INET6 WSAEWOULDBLOCK WSAEINPROGRESS WSAEINVAL WSAWOULDBLOCK);
 
-our $VERSION = 4.160;
+our $VERSION = 4.21;
 
 BEGIN {
    my $posix = 1 * eval { local $SIG{__DIE__}; require POSIX };
@@ -111,23 +111,45 @@ sub portable_pipe() {
    ($r, $w)
 }
 
-=item fork_call $coderef, @args, $cb->(@res)
+=item fork_call { CODE } @args, $cb->(@res)
 
-Executes the given code reference asynchronously, by forking. Everything
-the C<$coderef> returns will transferred to the calling process (by
-serialising and deserialising via L<Storable>).
+Executes the given code block asynchronously, by forking. Everything the
+block returns will be transferred to the calling process (by serialising and
+deserialising via L<Storable>).
 
 If there are any errors, then the C<$cb> will be called without any
-arguments. In that case, either C<$@> contains the exception, or C<$!>
-contains an error number. In all other cases, C<$@> will be C<undef>ined.
+arguments. In that case, either C<$@> contains the exception (and C<$!> is
+irrelevant), or C<$!> contains an error number. In all other cases, C<$@>
+will be C<undef>ined.
 
-The C<$coderef> must not ever call an event-polling function or use
-event-based programming.
+The code block must not ever call an event-polling function or use
+event-based programming that might cause any callbacks registered in the
+parent to run.
+
+Win32 spoilers: Due to the endlessly sucky and broken native windows
+perls (there is no way to cleanly exit a child process on that platform
+that doesn't also kill the parent), you have to make sure that your main
+program doesn't exit as long as any C<fork_calls> are still in progress,
+otherwise the program won't exit. Also, on most windows platforms some
+memory will leak for every invocation. We are open for improvements that
+don't require XS hackery.
 
 Note that forking can be expensive in large programs (RSS 200MB+). On
 windows, it is abysmally slow, do not expect more than 5..20 forks/s on
 that sucky platform (note this uses perl's pseudo-threads, so avoid those
 like the plague).
+
+Example: poor man's async disk I/O (better use L<IO::AIO>).
+
+   fork_call {
+      open my $fh, "</etc/passwd"
+         or die "passwd: $!";
+      local $/;
+      <$fh>
+   } sub {
+      my ($passwd) = @_;
+      ...
+   };
 
 =item $AnyEvent::Util::MAX_FORKS [default: 10]
 
@@ -148,11 +170,11 @@ my @fork_queue;
 
 sub _fork_schedule;
 sub _fork_schedule {
-   while () {
-      return if $forks >= $MAX_FORKS;
+   require Storable;
 
+   while ($forks < $MAX_FORKS) {
       my $job = shift @fork_queue
-         or return;
+         or last;
 
       ++$forks;
 
@@ -187,6 +209,10 @@ sub _fork_schedule {
 
                $cb->(@$result);
 
+               # work around the endlessly broken windows perls
+               sleep 1;
+               #kill 9, $pid if AnyEvent::WIN32;
+
                # clean up the pid
                waitpid $pid, 0;
             }
@@ -219,14 +245,16 @@ sub _fork_schedule {
             $ofs += $len;
          }
 
-         close $w;
-
+         # on native windows, _exit KILLS YOUR FORKED CHILDREN!
          if (AnyEvent::WIN32) {
-            kill 9, $$; # yeah, windows for the win
-         } else {
-            # on native windows, _exit KILLS YOUR FORKED CHILDREN!
-            POSIX::_exit (0);
+            warn "bp1\n";#d#
+            exec "";
+            warn "bp2($!)\n";#d#
+            shutdown $w, 1; # signal parent to please kill us
+            sleep 10; # give parent a chance to clean up
+            sysread $w, my $buf, 1; # this *might* detect the parent exiting in some cases.
          }
+         POSIX::_exit (0);
          exit 1;
          
       } elsif (($! != &Errno::EAGAIN && $! != &Errno::ENOMEM) || !$forks) {
@@ -237,11 +265,18 @@ sub _fork_schedule {
    }
 }
 
-sub fork_call {
-   require Storable;
-
+sub fork_call(&@) {
    push @fork_queue, [@_];
    _fork_schedule;
+}
+
+END {
+   if (AnyEvent::WIN32) {
+      while ($forks) {
+         @fork_queue = ();
+         AnyEvent->one_event;
+      }
+   }
 }
 
 # to be removed

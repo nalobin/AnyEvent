@@ -37,7 +37,7 @@ use AnyEvent ();
 use AnyEvent::Handle ();
 use AnyEvent::Util qw(AF_INET6);
 
-our $VERSION = 4.160;
+our $VERSION = 4.21;
 
 our @DNS_FALLBACK = (v208.67.220.220, v208.67.222.222);
 
@@ -1000,7 +1000,7 @@ sub _exec {
          $NOW = time;
 
          # timeout, try next
-         &$do_retry;
+         &$do_retry if $do_retry;
       }), sub {
          my ($res) = @_;
 
