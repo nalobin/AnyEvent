@@ -1,7 +1,7 @@
 package AnyEvent::Handle;
 
 no warnings;
-use strict;
+use strict qw(subs vars);
 
 use AnyEvent ();
 use AnyEvent::Util qw(WSAEWOULDBLOCK);
@@ -81,9 +81,12 @@ Set the callback to be called when an end-of-file condition is detected,
 i.e. in the case of a socket, when the other side has closed the
 connection cleanly.
 
-While not mandatory, it is highly recommended to set an eof callback,
+While not mandatory, it is I<highly> recommended to set an eof callback,
 otherwise you might end up with a closed socket while you are still
 waiting for data.
+
+If an EOF condition has been detected but no C<on_eof> callback has been
+set, then a fatal error will be raised with C<$!> set to <0>.
 
 =item on_error => $cb->($handle, $fatal)
 
@@ -732,8 +735,6 @@ sub _drain_rbuf {
    }
 
    while () {
-      no strict 'refs';
-
       my $len = length $self->{rbuf};
 
       if (my $cb = shift @{ $self->{_queue} }) {
@@ -770,8 +771,13 @@ sub _drain_rbuf {
       }
    }
 
-   $self->{on_eof}($self)
-      if $self->{_eof} && $self->{on_eof};
+   if ($self->{_eof}) {
+      if ($self->{on_eof}) {
+         $self->{on_eof}($self)
+      } else {
+         $self->_error (0, 1);
+      }
+   }
 
    # may need to restart read watcher
    unless ($self->{_rw}) {
@@ -907,15 +913,6 @@ register_read_type chunk => sub {
    }
 };
 
-# compatibility with older API
-sub push_read_chunk {
-   $_[0]->push_read (chunk => $_[1], $_[2]);
-}
-
-sub unshift_read_chunk {
-   $_[0]->unshift_read (chunk => $_[1], $_[2]);
-}
-
 =item line => [$eol, ]$cb->($handle, $line, $eol)
 
 The callback will be called only once a full line (including the end of
@@ -940,28 +937,26 @@ not marked by the end of line marker.
 register_read_type line => sub {
    my ($self, $cb, $eol) = @_;
 
-   $eol = qr|(\015?\012)| if @_ < 3;
-   $eol = quotemeta $eol unless ref $eol;
-   $eol = qr|^(.*?)($eol)|s;
+   if (@_ < 3) {
+      # this is more than twice as fast as the generic code below
+      sub {
+         $_[0]{rbuf} =~ s/^([^\015\012]*)(\015?\012)// or return;
 
-   sub {
-      $_[0]{rbuf} =~ s/$eol// or return;
+         $cb->($_[0], $1, $2);
+         1
+      }
+   } else {
+      $eol = quotemeta $eol unless ref $eol;
+      $eol = qr|^(.*?)($eol)|s;
 
-      $cb->($_[0], $1, $2);
-      1
+      sub {
+         $_[0]{rbuf} =~ s/$eol// or return;
+
+         $cb->($_[0], $1, $2);
+         1
+      }
    }
 };
-
-# compatibility with older API
-sub push_read_line {
-   my $self = shift;
-   $self->push_read (line => @_);
-}
-
-sub unshift_read_line {
-   my $self = shift;
-   $self->unshift_read (line => @_);
-}
 
 =item regex => $accept[, $reject[, $skip], $cb->($handle, $data)
 
@@ -1092,14 +1087,23 @@ register_read_type packstring => sub {
 
    sub {
       # when we can use 5.10 we can use ".", but for 5.8 we use the re-pack method
-      defined (my $len = eval { unpack $format, $_[0]->{rbuf} })
+      defined (my $len = eval { unpack $format, $_[0]{rbuf} })
          or return;
 
-      # remove prefix
-      substr $_[0]->{rbuf}, 0, (length pack $format, $len), "";
+      $format = length pack $format, $len;
 
-      # read rest
-      $_[0]->unshift_read (chunk => $len, $cb);
+      # bypass unshift if we already have the remaining chunk
+      if ($format + $len <= length $_[0]{rbuf}) {
+         my $data = substr $_[0]{rbuf}, $format, $len;
+         substr $_[0]{rbuf}, 0, $format + $len, "";
+         $cb->($_[0], $data);
+      } else {
+         # remove prefix
+         substr $_[0]{rbuf}, 0, $format, "";
+
+         # read remaining chunk
+         $_[0]->unshift_read (chunk => $len, $cb);
+      }
 
       1
    }
@@ -1166,20 +1170,31 @@ register_read_type storable => sub {
 
    sub {
       # when we can use 5.10 we can use ".", but for 5.8 we use the re-pack method
-      defined (my $len = eval { unpack "w", $_[0]->{rbuf} })
+      defined (my $len = eval { unpack "w", $_[0]{rbuf} })
          or return;
 
-      # remove prefix
-      substr $_[0]->{rbuf}, 0, (length pack "w", $len), "";
+      my $format = length pack "w", $len;
 
-      # read rest
-      $_[0]->unshift_read (chunk => $len, sub {
-         if (my $ref = eval { Storable::thaw ($_[1]) }) {
-            $cb->($_[0], $ref);
-         } else {
-            $self->_error (&Errno::EBADMSG);
-         }
-      });
+      # bypass unshift if we already have the remaining chunk
+      if ($format + $len <= length $_[0]{rbuf}) {
+         my $data = substr $_[0]{rbuf}, $format, $len;
+         substr $_[0]{rbuf}, 0, $format + $len, "";
+         $cb->($_[0], Storable::thaw ($data));
+      } else {
+         # remove prefix
+         substr $_[0]{rbuf}, 0, $format, "";
+
+         # read remaining chunk
+         $_[0]->unshift_read (chunk => $len, sub {
+            if (my $ref = eval { Storable::thaw ($_[1]) }) {
+               $cb->($_[0], $ref);
+            } else {
+               $self->_error (&Errno::EBADMSG);
+            }
+         });
+      }
+
+      1
    }
 };
 
