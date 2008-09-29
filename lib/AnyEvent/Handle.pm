@@ -16,7 +16,7 @@ AnyEvent::Handle - non-blocking I/O on file handles via AnyEvent
 
 =cut
 
-our $VERSION = 4.233;
+our $VERSION = 4.234;
 
 =head1 SYNOPSIS
 
@@ -60,6 +60,14 @@ treatment of characters applies to this module as well.
 
 All callbacks will be invoked with the handle object as their first
 argument.
+
+=head2 SIGPIPE is not handled by this module
+
+SIGPIPE is not handled by this module, so one of the practical
+requirements of using it is to ignore SIGPIPE (C<$SIG{PIPE} =
+'IGNORE'>). At least, this is highly recommend in a networked program: If
+you use AnyEvent::Handle in a filter program (like sort), exiting on
+SIGPIPE is probably the right thing to do.
 
 =head1 METHODS
 
