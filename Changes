@@ -1,5 +1,13 @@
 Revision history for Perl extension AnyEvent.
 
+4.31 Thu Oct 30 04:41:48 CET 2008
+	- implemented AnyEvent::Handle->destroy method.
+	- hint about unexpected effects in TLS mode.
+        - speed up AnyEvent::Impl::Perl by using more arrays
+          instead of hashes without the slightest loss of readability :)
+        - work around a perl argument refcounting bug.
+        - with some perl patches applied, AnyEvent now seems leak-free.
+
 4.3  Fri Oct  3 09:18:43 CEST 2008
 	- AnyEvent will now install a no-op signal handler for SIGPIPE,
           unless one has been installed already.
