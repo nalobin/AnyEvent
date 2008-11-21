@@ -37,7 +37,7 @@ use AnyEvent ();
 use AnyEvent::Handle ();
 use AnyEvent::Util qw(AF_INET6);
 
-our $VERSION = 4.32;
+our $VERSION = 4.33;
 
 our @DNS_FALLBACK = (v208.67.220.220, v208.67.222.222);
 
@@ -1118,7 +1118,7 @@ sub request($$) {
    $self->_scheduler;
 }
 
-=item $resolver->resolve ($qname, $qtype, %options, $cb->($rcode, @rr))
+=item $resolver->resolve ($qname, $qtype, %options, $cb->(@rr))
 
 Queries the DNS for the given domain name C<$qname> of type C<$qtype>.
 
