@@ -16,7 +16,7 @@ AnyEvent::Handle - non-blocking I/O on file handles via AnyEvent
 
 =cut
 
-our $VERSION = 4.33;
+our $VERSION = 4.331;
 
 =head1 SYNOPSIS
 
@@ -29,7 +29,7 @@ our $VERSION = 4.33;
       AnyEvent::Handle->new (
          fh => \*STDIN,
          on_eof => sub {
-            $cv->broadcast;
+            $cv->send;
          },
       );
 

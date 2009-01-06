@@ -31,10 +31,10 @@ use AnyEvent ();
 
 use base 'Exporter';
 
-our @EXPORT = qw(fh_nonblocking guard fork_call portable_pipe);
+our @EXPORT = qw(fh_nonblocking guard fork_call portable_pipe portable_socketpair);
 our @EXPORT_OK = qw(AF_INET6 WSAEWOULDBLOCK WSAEINPROGRESS WSAEINVAL WSAWOULDBLOCK);
 
-our $VERSION = 4.33;
+our $VERSION = 4.331;
 
 BEGIN {
    my $posix = 1 * eval { local $SIG{__DIE__}; require POSIX };
@@ -69,7 +69,7 @@ BEGIN {
    if (AnyEvent::WIN32) {
       eval "sub WSAEINVAL()      { 10022 }";
       eval "sub WSAEWOULDBLOCK() { 10035 }";
-      eval "sub WSAWOULDBLOCK() { 10035 }"; # TODO remove here ands from @export_ok
+      eval "sub WSAWOULDBLOCK() { 10035 }"; # TODO remove here and from @export_ok
       eval "sub WSAEINPROGRESS() { 10036 }";
    } else {
       # these should never match any errno value
@@ -84,31 +84,96 @@ BEGIN {
 
 Calling C<pipe> in Perl is portable - except it doesn't really work on
 sucky windows platforms (at least not with most perls - cygwin's perl
-notably works fine).
-
-On that platform, you actually get two file handles you cannot use select
-on.
+notably works fine): On windows, you actually get two file handles you
+cannot use select on.
 
 This function gives you a pipe that actually works even on the broken
-Windows platform (by creating a pair of TCP sockets, so do not expect any
+windows platform (by creating a pair of TCP sockets, so do not expect any
 speed from that).
+
+See portable_socketpair, below, for a bidirectional "pipe".
+
+Returns the empty list on any errors.
+
+=item ($fh1, $fh2) = portable_socketpair
+
+Just like C<portable_pipe>, above, but returns a bidirectional pipe
+(usually by calling socketpair to create a local loopback socket).
 
 Returns the empty list on any errors.
 
 =cut
 
-sub portable_pipe() {
-   my ($r, $w);
+sub _win32_socketpair {
+   # perl's socketpair emulation fails on many vista machines, because
+   # vista returns fantasy port numbers.
 
-   if (AnyEvent::WIN32) {
-      socketpair $r, $w, &Socket::AF_UNIX, &Socket::SOCK_STREAM, 0
-         or return;
-   } else {
-      pipe $r, $w
-         or return;
+   for (1..10) {
+      socket my $l, &Socket::AF_INET, &Socket::SOCK_STREAM, 0
+         or next;
+
+      bind $l, Socket::pack_sockaddr_in 0, "\x7f\x00\x00\x01"
+         or next;
+
+      my $sa = getsockname $l
+         or next;
+
+      listen $l, 1
+         or next;
+
+      socket my $r, &Socket::AF_INET, &Socket::SOCK_STREAM, 0
+         or next;
+
+      bind $r, Socket::pack_sockaddr_in 0, "\x7f\x00\x00\x01"
+         or next;
+
+      connect $r, $sa
+         or next;
+
+      accept my $w, $l
+         or next;
+
+      # vista has completely broken peername/sockname that return
+      # fantasy ports. this combo seems to work, though.
+      #
+      (Socket::unpack_sockaddr_in getpeername $r)[0]
+      == (Socket::unpack_sockaddr_in getsockname $w)[0]
+         or (($! = WSAEINVAL), next);
+
+      # vista example (you can't make this shit up...):
+      #(Socket::unpack_sockaddr_in getsockname $r)[0] == 53364
+      #(Socket::unpack_sockaddr_in getpeername $r)[0] == 53363
+      #(Socket::unpack_sockaddr_in getsockname $w)[0] == 53363
+      #(Socket::unpack_sockaddr_in getpeername $w)[0] == 53365
+
+      return ($r, $w);
    }
 
-   ($r, $w)
+   ()
+}
+
+sub portable_pipe() {
+   if (AnyEvent::WIN32) {
+      return _win32_socketpair;
+   } else {
+      my ($r, $w);
+
+      pipe $r, $w
+         or return;
+
+      return ($r, $w);
+   }
+}
+
+sub portable_socketpair() {
+   if (AnyEvent::WIN32) {
+      return _win32_socketpair;
+   } else {
+      socketpair my $fh1, my $fh2, &Socket::AF_UNIX, &Socket::SOCK_STREAM, &Socket::PF_UNSPEC
+         or return;
+
+      return ($fh1, $fh2)
+   }
 }
 
 =item fork_call { CODE } @args, $cb->(@res)
@@ -319,6 +384,9 @@ code block.
 This is often handy in continuation-passing style code to clean up some
 resource regardless of where you break out of a process.
 
+The L<Guard> module will be used to implement this function, if it is
+available. Otherwise a pure-perl implementation is used.
+
 You can call one method on the returned object:
 
 =item $guard->cancel
@@ -328,23 +396,29 @@ guard.
 
 =cut
 
-sub AnyEvent::Util::Guard::DESTROY {
-   local $@;
+BEGIN {
+   if (eval "use Guard 0.5; 1") {
+      *guard = \&Guard::guard;
+   } else {
+      *AnyEvent::Util::Guard::DESTROY = sub {
+         local $@;
 
-   eval {
-      local $SIG{__DIE__};
-      ${$_[0]}->();
-   };
+         eval {
+            local $SIG{__DIE__};
+            ${$_[0]}->();
+         };
 
-   warn "runtime error in AnyEvent::guard callback: $@" if $@;
-}
+         warn "runtime error in AnyEvent::guard callback: $@" if $@;
+      };
 
-sub AnyEvent::Util::Guard::cancel($) {
-   ${$_[0]} = sub { };
-}
+      *AnyEvent::Util::Guard::cancel = sub ($) {
+         ${$_[0]} = sub { };
+      };
 
-sub guard(&) {
-   bless \(my $cb = shift), AnyEvent::Util::Guard::
+      *guard = sub (&) {
+         bless \(my $cb = shift), AnyEvent::Util::Guard::
+      }
+   }
 }
 
 1;

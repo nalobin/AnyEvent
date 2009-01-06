@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:                AnyEvent
-version:             4.33
+version:             4.331
 abstract:            ~
 license:             ~
 author:              ~
@@ -16,4 +16,5 @@ recommends:
   JSON: 2.09
   JSON::XS 2.2
   EV: 4.05
+  Guard: 0.5
     
