@@ -1,5 +1,15 @@
 Revision history for Perl extension AnyEvent.
 
+4.34  Thu Feb 12 18:32:45 CET 2009
+	- separately buffer TLS read data, as otherwise the read queue could
+          deadlock as receiving data is not expected while draining the
+          read queue (which cna only happen with TLS).
+	- raise EBADMSG error on JSON decoding errors.
+        - fix some minor manpage bugs (reported by Maximilian Gaß).
+        - speed up select bitmask parsing quite a bit in the pure perl
+          backend.
+        - use CORE::select instead of just select in AnyEvent::Impl::Perl.
+
 4.331 Tue Jan  6 21:07:25 CET 2009
 	- socketpair fails on many vista machines because vista has
           completely broken accept/getpeername and getsockname functions,

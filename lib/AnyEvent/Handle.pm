@@ -16,7 +16,7 @@ AnyEvent::Handle - non-blocking I/O on file handles via AnyEvent
 
 =cut
 
-our $VERSION = 4.331;
+our $VERSION = 4.34;
 
 =head1 SYNOPSIS
 
@@ -129,7 +129,9 @@ callback will only be called when at least one octet of data is in the
 read buffer).
 
 To access (and remove data from) the read buffer, use the C<< ->rbuf >>
-method or access the C<$handle->{rbuf}> member directly.
+method or access the C<$handle->{rbuf}> member directly. Note that you
+must not enlarge or modify the read buffer, you can only remove data at
+the beginning from it.
 
 When an EOF condition is detected then AnyEvent::Handle will first try to
 feed all the remaining data to the queued callbacks and C<on_read> before
@@ -256,6 +258,11 @@ You can also provide your own TLS connection object, but you have
 to make sure that you call either C<Net::SSLeay::set_connect_state>
 or C<Net::SSLeay::set_accept_state> on it before you pass it to
 AnyEvent::Handle.
+
+B<IMPORTANT:> since Net::SSLeay "objects" are really only integers,
+passing in the wrong integer will lead to certain crash. This most often
+happens when one uses a stylish C<< tls => 1 >> and is surprised about the
+segmentation fault.
 
 See the C<< ->starttls >> method for when need to start TLS negotiation later.
 
@@ -764,6 +771,10 @@ sub _drain_rbuf {
    }
 
    while () {
+      # we need to use a separate tls read buffer, as we must not receive data while
+      # we are draining the buffer, and this can only happen with TLS.
+      $self->{rbuf} .= delete $self->{_tls_rbuf} if exists $self->{_tls_rbuf};
+
       my $len = length $self->{rbuf};
 
       if (my $cb = shift @{ $self->{_queue} }) {
@@ -834,8 +845,11 @@ sub on_read {
 
 Returns the read buffer (as a modifiable lvalue).
 
-You can access the read buffer directly as the C<< ->{rbuf} >> member, if
-you want.
+You can access the read buffer directly as the C<< ->{rbuf} >>
+member, if you want. However, the only operation allowed on the
+read buffer (apart from looking at it) is removing data from its
+beginning. Otherwise modifying or appending to it is not allowed and will
+lead to hard-to-track-down bugs.
 
 NOTE: The read buffer should only be used or modified if the C<on_read>,
 C<push_read> or C<unshift_read> methods are used. The other read methods
@@ -1141,7 +1155,8 @@ register_read_type packstring => sub {
 
 =item json => $cb->($handle, $hash_or_arrayref)
 
-Reads a JSON object or array, decodes it and passes it to the callback.
+Reads a JSON object or array, decodes it and passes it to the
+callback. When a parse error occurs, an C<EBADMSG> error will be raised.
 
 If a C<json> object was passed to the constructor, then that will be used
 for the final decode, otherwise it will create a JSON coder expecting UTF-8.
@@ -1168,7 +1183,7 @@ register_read_type json => sub {
    my $json = $self->{json} ||= JSON->new->utf8;
 
    sub {
-      my $ref = $json->incr_parse ($self->{rbuf});
+      my $ref = eval { $json->incr_parse ($self->{rbuf}) };
 
       if ($ref) {
          $self->{rbuf} = $json->incr_text;
@@ -1176,8 +1191,19 @@ register_read_type json => sub {
          $cb->($self, $ref);
 
          1
+      } elsif ($@) {
+         # error case
+         $json->incr_skip;
+
+         $self->{rbuf} = $json->incr_text;
+         $json->incr_text = "";
+
+         $self->_error (&Errno::EBADMSG);
+
+         ()
       } else {
          $self->{rbuf} = "";
+
          ()
       }
    }
@@ -1328,7 +1354,7 @@ sub _dotls {
          &_freetls;
       }
 
-      $self->{rbuf} .= $tmp;
+      $self->{_tls_rbuf} .= $tmp;
       $self->_drain_rbuf unless $self->{_in_drain};
       $self->{tls} or return; # tls session might have gone away in callback
    }
@@ -1338,7 +1364,7 @@ sub _dotls {
    if ($tmp != Net::SSLeay::ERROR_WANT_READ ()) {
       if ($tmp == Net::SSLeay::ERROR_SYSCALL ()) {
          return $self->_error ($!, 1);
-      } elsif ($tmp == Net::SSLeay::ERROR_SSL ())  {
+      } elsif ($tmp == Net::SSLeay::ERROR_SSL ()) {
          return $self->_error (&Errno::EIO, 1);
       }
 

@@ -91,7 +91,7 @@ use Scalar::Util qw(weaken);
 use AnyEvent ();
 use AnyEvent::Util ();
 
-our $VERSION = 4.331;
+our $VERSION = 4.34;
 
 our ($NOW, $MNOW);
 
@@ -186,7 +186,7 @@ sub one_event {
 
       $wait = $wait < MAXWAIT ? $wait + ROUNDUP : MAXWAIT;
 
-      if ($fds = select
+      if ($fds = CORE::select
             $vec[0] = $fds[0][V],
             $vec[1] = $fds[1][V],
             AnyEvent::WIN32 ? $vec[2] = $fds[1][V] : undef,
@@ -205,17 +205,17 @@ sub one_event {
             # we parse the bitmask by first expanding it into
             # a string of bits
             for (unpack "b*", $vec[$_]) {
-               # and then repeatedly match a regex skipping the 0's
-               while (/\G0*1/g) {
-                  # and using the resulting string position as fd
+               # and then repeatedly matching a regex against it
+               while (/1/g) {
+                  # and use the resulting string position as fd
                   $_ && $_->[2]()
-                     for @{ $fds->[W][-1 + pos] || [] };
+                     for @{ $fds->[W][(pos) - 1] || [] };
                }
             }
          }
       } elsif (AnyEvent::WIN32 && $! == AnyEvent::Util::WSAEINVAL) {
          # buggy microshit windoze asks us to route around it
-         select undef, undef, undef, $wait;
+         CORE::select undef, undef, undef, $wait;
       }
    }
 }
