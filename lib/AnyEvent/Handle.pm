@@ -16,7 +16,7 @@ AnyEvent::Handle - non-blocking I/O on file handles via AnyEvent
 
 =cut
 
-our $VERSION = 4.34;
+our $VERSION = 4.35;
 
 =head1 SYNOPSIS
 
@@ -1475,7 +1475,7 @@ sub _freetls {
 }
 
 sub DESTROY {
-   my $self = shift;
+   my ($self) = @_;
 
    &_freetls;
 

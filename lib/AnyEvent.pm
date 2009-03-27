@@ -139,6 +139,12 @@ creating a watcher it will immediately "watch" for events and invoke the
 callback when the event occurs (of course, only when the event model
 is in control).
 
+Note that B<callbacks must not permanently change global variables>
+potentially in use by the event loop (such as C<$_> or C<$[>) and that B<<
+callbacks must not C<die> >>. The former is good programming practise in
+Perl and the latter stems from the fact that exception handling differs
+widely between event loops.
+
 To disable the watcher you have to destroy it (e.g. by setting the
 variable you store it in to C<undef> or otherwise deleting all references
 to it).
@@ -164,11 +170,17 @@ declared.
 You can create an I/O watcher by calling the C<< AnyEvent->io >> method
 with the following mandatory key-value pairs as arguments:
 
-C<fh> the Perl I<file handle> (I<not> file descriptor) to watch for events
-(AnyEvent might or might not keep a reference to this file handle). C<poll>
-must be a string that is either C<r> or C<w>, which creates a watcher
-waiting for "r"eadable or "w"ritable events, respectively. C<cb> is the
-callback to invoke each time the file handle becomes ready.
+C<fh> is the Perl I<file handle> (I<not> file descriptor) to watch
+for events (AnyEvent might or might not keep a reference to this file
+handle). Note that only file handles pointing to things for which
+non-blocking operation makes sense are allowed. This includes sockets,
+most character devices, pipes, fifos and so on, but not for example files
+or block devices.
+
+C<poll> must be a string that is either C<r> or C<w>, which creates a
+watcher waiting for "r"eadable or "w"ritable events, respectively.
+
+C<cb> is the callback to invoke each time the file handle becomes ready.
 
 Although the callback might get passed parameters, their value and
 presence is undefined and you cannot rely on them. Portable AnyEvent
@@ -863,7 +875,7 @@ use strict qw(vars subs);
 
 use Carp;
 
-our $VERSION = 4.34;
+our $VERSION = 4.35;
 our $MODEL;
 
 our $AUTOLOAD;
@@ -1006,8 +1018,6 @@ sub AUTOLOAD {
 sub _dupfh($$$$) {
    my ($poll, $fh, $r, $w) = @_;
 
-   require Fcntl;
-
    # cygwin requires the fh mode to be matching, unix doesn't
    my ($rw, $mode) = $poll eq "r" ? ($r, "<")
                    : $poll eq "w" ? ($w, ">")
@@ -1045,17 +1055,47 @@ sub condvar {
 
 # default implementation for ->signal
 
-our %SIG_CB;
+our ($SIGPIPE_R, $SIGPIPE_W, %SIG_CB, %SIG_EV, $SIG_IO);
+
+sub _signal_exec {
+   sysread $SIGPIPE_R, my $dummy, 4;
+
+   while (%SIG_EV) {
+      for (keys %SIG_EV) {
+         delete $SIG_EV{$_};
+         $_->() for values %{ $SIG_CB{$_} || {} };
+      }
+   }
+}
 
 sub signal {
    my (undef, %arg) = @_;
+
+   unless ($SIGPIPE_R) {
+      if (AnyEvent::WIN32) {
+         ($SIGPIPE_R, $SIGPIPE_W) = AnyEvent::Util::portable_pipe ();
+         AnyEvent::Util::fh_nonblocking ($SIGPIPE_R) if $SIGPIPE_R;
+         AnyEvent::Util::fh_nonblocking ($SIGPIPE_W) if $SIGPIPE_W; # just in case
+      } else {
+         pipe $SIGPIPE_R, $SIGPIPE_W;
+         require Fcntl;
+         fcntl $SIGPIPE_R, &Fcntl::F_SETFL, &Fcntl::O_NONBLOCK if $SIGPIPE_R;
+         fcntl $SIGPIPE_W, &Fcntl::F_SETFL, &Fcntl::O_NONBLOCK if $SIGPIPE_W; # just in case
+      }
+
+      $SIGPIPE_R
+         or Carp::croak "AnyEvent: unable to create a signal reporting pipe: $!\n";
+
+      $SIG_IO = AnyEvent->io (fh => $SIGPIPE_R, poll => "r", cb => \&_signal_exec);
+   }
 
    my $signal = uc $arg{signal}
       or Carp::croak "required option 'signal' is missing";
 
    $SIG_CB{$signal}{$arg{cb}} = $arg{cb};
    $SIG{$signal} ||= sub {
-      $_->() for values %{ $SIG_CB{$signal} || {} };
+      syswrite $SIGPIPE_W, "\x00", 1 unless %SIG_EV;
+      undef $SIG_EV{$signal};
    };
 
    bless [$signal, $arg{cb}], "AnyEvent::Base::Signal"
@@ -1265,7 +1305,7 @@ list.
 
 This variable can effectively be used for denial-of-service attacks
 against local programs (e.g. when setuid), although the impact is likely
-small, as the program has to handle connection errors already-
+small, as the program has to handle conenction and other failures anyways.
 
 Examples: C<PERL_ANYEVENT_PROTOCOLS=ipv4,ipv6> - prefer IPv4 over IPv6,
 but support both and try to use both.  C<PERL_ANYEVENT_PROTOCOLS=ipv4>
@@ -1829,7 +1869,7 @@ $ENV{PERL_ANYEGENT_STRICT}.
 Perl 5.8 has numerous memleaks that sometimes hit this module and are hard
 to work around. If you suffer from memleaks, first upgrade to Perl 5.10
 and check wether the leaks still show up. (Perl 5.10.0 has other annoying
-mamleaks, such as leaking on C<map> and C<grep> but it is usually not as
+memleaks, such as leaking on C<map> and C<grep> but it is usually not as
 pronounced).
 
 
