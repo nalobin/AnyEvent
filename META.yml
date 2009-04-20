@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               AnyEvent
-version:            4.351
+version:            4.352
 abstract:           ~
 author:  []
 license:            unknown
@@ -17,8 +17,8 @@ meta-spec:
     url:      http://module-build.sourceforge.net/META-spec-v1.4.html
     version:  1.4
 recommends:
-    EV:           4.05
-    Guard:        0.5
+    EV:           3.05
+    Guard:        1.02
     JSON:         2.09
     JSON::XS:     2.2
     Net::SSLeay:  1.32

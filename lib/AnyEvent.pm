@@ -322,6 +322,21 @@ can get whatever behaviour you want with any event loop, by taking the
 difference between C<< AnyEvent->time >> and C<< AnyEvent->now >> into
 account.
 
+=item AnyEvent->now_update
+
+Some event loops (such as L<EV> or L<AnyEvent::Impl::Perl>) cache
+the current time for each loop iteration (see the discussion of L<<
+AnyEvent->now >>, above).
+
+When a callback runs for a long time (or when the process sleeps), then
+this "current" time will differ substantially from the real time, which
+might affect timers and time-outs.
+
+When this is the case, you can call this method, which will update the
+event loop's idea of "current time".
+
+Note that updating the time I<might> cause some events to be handled.
+
 =back
 
 =head2 SIGNAL WATCHERS
@@ -875,7 +890,7 @@ use strict qw(vars subs);
 
 use Carp;
 
-our $VERSION = 4.351;
+our $VERSION = 4.352;
 our $MODEL;
 
 our $AUTOLOAD;
@@ -917,7 +932,8 @@ my @models = (
    [Prima::                => AnyEvent::Impl::POE::],
 );
 
-our %method = map +($_ => 1), qw(io timer time now signal child condvar one_event DESTROY);
+our %method = map +($_ => 1),
+   qw(io timer time now now_update signal child condvar one_event DESTROY);
 
 our @post_detect;
 
@@ -984,7 +1000,7 @@ sub detect() {
             }
 
             $MODEL
-              or die "No event module selected for AnyEvent and autodetect failed. Install any one of these modules: EV, Event or Glib.";
+              or die "No event module selected for AnyEvent and autodetect failed. Install any one of these modules: EV, Event or Glib.\n";
          }
       }
 
@@ -1024,7 +1040,7 @@ sub _dupfh($$$$) {
                    : Carp::croak "AnyEvent->io requires poll set to either 'r' or 'w'";
 
    open my $fh2, "$mode&" . fileno $fh
-      or die "cannot dup() filehandle: $!";
+      or die "cannot dup() filehandle: $!,";
 
    # we assume CLOEXEC is already set by perl in all important cases
 
@@ -1033,7 +1049,7 @@ sub _dupfh($$$$) {
 
 package AnyEvent::Base;
 
-# default implementation for now and time
+# default implementations for many methods
 
 BEGIN {
    if (eval "use Time::HiRes (); time (); 1") {
@@ -1046,6 +1062,7 @@ BEGIN {
 
 sub time { _time }
 sub now  { _time }
+sub now_update { }
 
 # default implementation for ->condvar
 
