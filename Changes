@@ -1,5 +1,15 @@
 Revision history for Perl extension AnyEvent.
 
+4.4   Sun Apr 26 20:12:33 CEST 2009
+	- implemented idle watchers, where applicable.
+	- AnyEvent->time died when Event backend was in use.
+        - fix a memleak in the Tk backend.
+        - sped up Tk timer handling.
+        - clip negative "after" values to 0 in AnyEvent::Impl::Event
+          to avoid spamming out warning messages.
+        - fix Qt timers without interval.
+        - avoid Qt zero-timeout specialcase, in old libqt's.
+
 4.352 Mon Apr 20 16:31:11 CEST 2009
 	- fix AnyEvent::Strict error messages for child watchers.
         - fix/update Makefile.PL "recommends" versions.

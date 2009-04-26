@@ -34,7 +34,7 @@ use base 'Exporter';
 our @EXPORT = qw(fh_nonblocking guard fork_call portable_pipe portable_socketpair);
 our @EXPORT_OK = qw(AF_INET6 WSAEWOULDBLOCK WSAEINPROGRESS WSAEINVAL WSAWOULDBLOCK);
 
-our $VERSION = 4.352;
+our $VERSION = 4.4;
 
 BEGIN {
    my $posix = 1 * eval { local $SIG{__DIE__}; require POSIX };
@@ -400,7 +400,7 @@ BEGIN {
    if (eval "use Guard 0.5; 1") {
       *guard = \&Guard::guard;
    } else {
-      *AnyEvent::Util::Guard::DESTROY = sub {
+      *AnyEvent::Util::guard::DESTROY = sub {
          local $@;
 
          eval {
@@ -411,12 +411,12 @@ BEGIN {
          warn "runtime error in AnyEvent::guard callback: $@" if $@;
       };
 
-      *AnyEvent::Util::Guard::cancel = sub ($) {
+      *AnyEvent::Util::guard::cancel = sub ($) {
          ${$_[0]} = sub { };
       };
 
       *guard = sub (&) {
-         bless \(my $cb = shift), AnyEvent::Util::Guard::
+         bless \(my $cb = shift), "AnyEvent::Util::guard"
       }
    }
 }
