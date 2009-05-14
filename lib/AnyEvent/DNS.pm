@@ -37,7 +37,7 @@ use AnyEvent ();
 use AnyEvent::Handle ();
 use AnyEvent::Util qw(AF_INET6);
 
-our $VERSION = 4.4;
+our $VERSION = 4.41;
 
 our @DNS_FALLBACK = (v208.67.220.220, v208.67.222.222);
 
@@ -354,6 +354,7 @@ our %type_id = (
    aaaa  =>  28,
    srv   =>  33,
    naptr =>  35, # rfc2915
+   dname =>  39, # rfc2672
    opt   =>  41,
    spf   =>  99,
    tkey  => 249,
@@ -513,6 +514,7 @@ our %dec_rr = (
        local $ofs = $ofs + $offset - length;
        ($order, $preference, $flags, $service, $regexp, _dec_name)
     },
+    39 => sub { local $ofs = $ofs - length; _dec_name }, # dname
     99 => sub { unpack "(C/a*)*", $_ }, # spf
 );
 
