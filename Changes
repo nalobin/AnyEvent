@@ -1,5 +1,13 @@
 Revision history for Perl extension AnyEvent.
 
+4.412 Wed Jun 24 01:35:57 CEST 2009
+	- support an "untaint" attribute for AnyEvent::DNS
+          and set it on the default resolver.
+	- implement and document AnyEvent::Impl::Perl::loop.
+        - remove all anyevent-env variables from %ENV
+          when running in tainted mode.
+        - mention and extend the IO::Lambda benchmark.
+
 4.411 Sun Jun  7 18:48:02 CEST 2009
 	- do not try to use F_SETFD on windows.
 
@@ -22,7 +30,7 @@ Revision history for Perl extension AnyEvent.
         - clip negative "after" values to 0 in AnyEvent::Impl::Event
           to avoid spamming out warning messages.
         - fix Qt timers without interval.
-        - avoid Qt zero-timeout specialcase, in old libqt's.
+        - avoid Qt zero-timeout special case, in old libqt's.
 
 4.352 Mon Apr 20 16:31:11 CEST 2009
 	- fix AnyEvent::Strict error messages for child watchers.

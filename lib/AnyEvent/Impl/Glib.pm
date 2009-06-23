@@ -39,7 +39,7 @@ use strict;
 
 use Glib ();
 
-our $maincontext = Glib::MainContext->default;
+our $mainloop = Glib::MainContext->default;
 
 sub io {
    my ($class, %arg) = @_;
@@ -86,7 +86,11 @@ sub DESTROY {
 }
 
 sub one_event {
-   $maincontext->iteration (1);
+   $mainloop->iteration (1);
+}
+
+sub loop {
+   $mainloop->iteration (1) while 1; # hackish, but w ehave no mainloop
 }
 
 1;

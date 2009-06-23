@@ -933,7 +933,7 @@ use strict qw(vars subs);
 
 use Carp;
 
-our $VERSION = 4.411;
+our $VERSION = 4.412;
 our $MODEL;
 
 our $AUTOLOAD;
@@ -944,8 +944,11 @@ our @REGISTRY;
 our $WIN32;
 
 BEGIN {
-   my $win32 = ! ! ($^O =~ /mswin32/i);
-   eval "sub WIN32(){ $win32 }";
+   eval "sub WIN32(){ " . (($^O =~ /mswin32/i)*1) ." }";
+   eval "sub TAINT(){ " . (${^TAINT}*1) . " }";
+
+   delete @ENV{grep /^PERL_ANYEVENT_/, keys %ENV}
+      if ${^TAINT};
 }
 
 our $verbose = $ENV{PERL_ANYEVENT_VERBOSE}*1;
@@ -1339,7 +1342,11 @@ so on.
 =head1 ENVIRONMENT VARIABLES
 
 The following environment variables are used by this module or its
-submodules:
+submodules.
+
+Note that AnyEvent will remove I<all> environment variables starting with
+C<PERL_ANYEVENT_> from C<%ENV> when it is loaded while taint mode is
+enabled.
 
 =over 4
 
@@ -1889,6 +1896,62 @@ watchers, as the management overhead dominates.
 
 =back
 
+=head2 THE IO::Lambda BENCHMARK
+
+Recently I was told about the benchmark in the IO::Lambda manpage, which
+could be misinterpreted to make AnyEvent look bad. In fact, the benchmark
+simply compares IO::Lambda with POE, and IO::Lambda looks better (which
+shouldn't come as a surprise to anybody). As such, the benchmark is
+fine, and shows that the AnyEvent backend from IO::Lambda isn't very
+optimal. But how would AnyEvent compare when used without the extra
+baggage? To explore this, I wrote the equivalent benchmark for AnyEvent.
+
+The benchmark itself creates an echo-server, and then, for 500 times,
+connects to the echo server, sends a line, waits for the reply, and then
+creates the next connection. This is a rather bad benchmark, as it doesn't
+test the efficiency of the framework, but it is a benchmark nevertheless.
+
+   name                    runtime
+   Lambda/select           0.330 sec
+      + optimized          0.122 sec
+   Lambda/AnyEvent         0.327 sec
+      + optimized          0.138 sec
+   Raw sockets/select      0.077 sec
+   POE/select, components  0.662 sec
+   POE/select, raw sockets 0.226 sec
+   POE/select, optimized   0.404 sec
+
+   AnyEvent/select/nb      0.085 sec
+   AnyEvent/EV/nb          0.068 sec
+      +state machine       0.134 sec
+
+The benchmark is also a bit unfair (my fault) - the IO::Lambda
+benchmarks actually make blocking connects and use 100% blocking I/O,
+defeating the purpose of an event-based solution. All of the newly
+written AnyEvent benchmarks use 100% non-blocking connects (using
+AnyEvent::Socket::tcp_connect and the asynchronous pure perl DNS
+resolver), so AnyEvent is at a disadvantage here as non-blocking connects
+generally require a lot more bookkeeping and event handling than blocking
+connects (which involve a single syscall only).
+
+The last AnyEvent benchmark additionally uses L<AnyEvent::Handle>, which
+offers similar expressive power as POE and IO::Lambda (using conventional
+Perl syntax), which means both the echo server and the client are 100%
+non-blocking w.r.t. I/O, further placing it at a disadvantage.
+
+As you can see, AnyEvent + EV even beats the hand-optimised "raw sockets
+benchmark", while AnyEvent + its pure perl backend easily beats
+IO::Lambda and POE.
+
+And even the 100% non-blocking version written using the high-level (and
+slow :) L<AnyEvent::Handle> abstraction beats both POE and IO::Lambda,
+even thought it does all of DNS, tcp-connect and socket I/O in a
+non-blocking way.
+
+The two AnyEvent benchmarks can be found as F<eg/ae0.pl> and F<eg/ae2.pl>
+in the AnyEvent distribution, the remaining benchmarks are part of the
+IO::lambda distribution and were used without any changes.
+
 
 =head1 SIGNALS
 
@@ -1955,7 +2018,7 @@ before the first watcher gets created, e.g. with a C<BEGIN> block:
 Similar considerations apply to $ENV{PERL_ANYEVENT_VERBOSE}, as that can
 be used to probe what backend is used and gain other information (which is
 probably even less useful to an attacker than PERL_ANYEVENT_MODEL), and
-$ENV{PERL_ANYEGENT_STRICT}.
+$ENV{PERL_ANYEVENT_STRICT}.
 
 
 =head1 BUGS
