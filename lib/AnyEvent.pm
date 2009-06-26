@@ -394,13 +394,17 @@ There is a slight catch to child watchers, however: you usually start them
 I<after> the child process was created, and this means the process could
 have exited already (and no SIGCHLD will be sent anymore).
 
-Not all event models handle this correctly (POE doesn't), but even for
-event models that I<do> handle this correctly, they usually need to be
-loaded before the process exits (i.e. before you fork in the first place).
+Not all event models handle this correctly (neither POE nor IO::Async do,
+see their AnyEvent::Impl manpages for details), but even for event models
+that I<do> handle this correctly, they usually need to be loaded before
+the process exits (i.e. before you fork in the first place). AnyEvent's
+pure perl event loop handles all cases correctly regardless of when you
+start the watcher.
 
-This means you cannot create a child watcher as the very first thing in an
-AnyEvent program, you I<have> to create at least one watcher before you
-C<fork> the child (alternatively, you can call C<AnyEvent::detect>).
+This means you cannot create a child watcher as the very first
+thing in an AnyEvent program, you I<have> to create at least one
+watcher before you C<fork> the child (alternatively, you can call
+C<AnyEvent::detect>).
 
 Example: fork a process and wait for it
 
@@ -732,6 +736,10 @@ The known classes so far are:
    AnyEvent::Impl::EventLib  based on Event::Lib, leaks memory and worse.
    AnyEvent::Impl::POE       based on POE, not generic enough for full support.
 
+   # warning, support for IO::Async is only partial, as it is too broken
+   # and limited toe ven support the AnyEvent API. See AnyEvent::Impl::Async.
+   AnyEvent::Impl::IOAsync   based on IO::Async, cannot be autoprobed (see its docs).
+
 There is no support for WxWidgets, as WxWidgets has no support for
 watching file handles. However, you can use WxWidgets through the
 POE Adaptor, as POE has a Wx backend that simply polls 20 times per
@@ -933,7 +941,7 @@ use strict qw(vars subs);
 
 use Carp;
 
-our $VERSION = 4.412;
+our $VERSION = 4.42;
 our $MODEL;
 
 our $AUTOLOAD;
@@ -976,6 +984,13 @@ my @models = (
    [POE::Kernel::          => AnyEvent::Impl::POE::],      # lasciate ogni speranza
    [Wx::                   => AnyEvent::Impl::POE::],
    [Prima::                => AnyEvent::Impl::POE::],
+   # IO::Async is just too broken - we would need workaorunds for its
+   # byzantine signal and broken child handling, among others.
+   # IO::Async is rather hard to detect, as it doesn't have any
+   # obvious default class.
+#   [IO::Async::            => AnyEvent::Impl::IOAsync::],  # requires special main program
+#   [IO::Async::Loop::      => AnyEvent::Impl::IOAsync::],  # requires special main program
+#   [IO::Async::Notifier::  => AnyEvent::Impl::IOAsync::],  # requires special main program
 );
 
 our %method = map +($_ => 1),
@@ -1077,7 +1092,7 @@ sub AUTOLOAD {
 # utility function to dup a filehandle. this is used by many backends
 # to support binding more than one watcher per filehandle (they usually
 # allow only one watcher per fd, so we dup it to get a different one).
-sub _dupfh($$$$) {
+sub _dupfh($$;$$) {
    my ($poll, $fh, $r, $w) = @_;
 
    # cygwin requires the fh mode to be matching, unix doesn't
@@ -1368,12 +1383,12 @@ model it chooses.
 AnyEvent does not do much argument checking by default, as thorough
 argument checking is very costly. Setting this variable to a true value
 will cause AnyEvent to load C<AnyEvent::Strict> and then to thoroughly
-check the arguments passed to most method calls. If it finds any problems
+check the arguments passed to most method calls. If it finds any problems,
 it will croak.
 
 In other words, enables "strict" mode.
 
-Unlike C<use strict>, it is definitely recommended ot keep it off in
+Unlike C<use strict>, it is definitely recommended to keep it off in
 production. Keeping C<PERL_ANYEVENT_STRICT=1> in your environment while
 developing programs can be very useful, however.
 
@@ -1682,6 +1697,8 @@ watcher.
       Perl/Any   100000   452   4.13   0.73    0.95 pure perl implementation
    Event/Event    16000   517  32.20  31.80    0.81 Event native interface
      Event/Any    16000   590  35.85  31.55    1.06 Event + AnyEvent watchers
+   IOAsync/Any    16000   989  38.10  32.77   11.13 via IO::Async::Loop::IO_Poll
+   IOAsync/Any    16000   990  37.59  29.50   10.61 via IO::Async::Loop::Epoll
       Glib/Any    16000  1357 102.33  12.31   51.00 quadratic behaviour
         Tk/Any     2000  1860  27.20  66.31   14.00 SEGV with >> 2000 watchers
      POE/Event     2000  6328 109.99 751.67   14.02 via POE::Loop::Event
@@ -1720,6 +1737,9 @@ them active), of course, but this was not subject of this benchmark.
 
 The C<Event> module has a relatively high setup and callback invocation
 cost, but overall scores in on the third place.
+
+C<IO::Async> performs admirably well, about on par with C<Event>, even
+when using its pure perl backend.
 
 C<Glib>'s memory usage is quite a bit higher, but it features a
 faster callback invocation and overall ends up in the same class as
@@ -1807,12 +1827,14 @@ a new one that moves the timeout into the future.
 
 =head3 Results
 
-    name sockets create  request 
-      EV   20000  69.01    11.16 
-    Perl   20000  73.32    35.87 
-   Event   20000 212.62   257.32 
-    Glib   20000 651.16  1896.30 
-     POE   20000 349.67 12317.24 uses POE::Loop::Event
+     name sockets create  request 
+       EV   20000  69.01    11.16 
+     Perl   20000  73.32    35.87 
+  IOAsync   20000 157.00    98.14 epoll
+  IOAsync   20000 159.31   616.06 poll
+    Event   20000 212.62   257.32 
+     Glib   20000 651.16  1896.30 
+      POE   20000 349.67 12317.24 uses POE::Loop::Event
 
 =head3 Discussion
 
@@ -1824,6 +1846,9 @@ is relatively high, though.
 
 Perl surprisingly comes second. It is much faster than the C-based event
 loops Event and Glib.
+
+IO::Async performs very well when using its epoll backend, and still quite
+good compared to Glib when using its pure perl backend.
 
 Event suffers from high setup time as well (look at its code and you will
 understand why). Callback invocation also has a high overhead compared to
@@ -1902,14 +1927,15 @@ Recently I was told about the benchmark in the IO::Lambda manpage, which
 could be misinterpreted to make AnyEvent look bad. In fact, the benchmark
 simply compares IO::Lambda with POE, and IO::Lambda looks better (which
 shouldn't come as a surprise to anybody). As such, the benchmark is
-fine, and shows that the AnyEvent backend from IO::Lambda isn't very
-optimal. But how would AnyEvent compare when used without the extra
+fine, and mostly shows that the AnyEvent backend from IO::Lambda isn't
+very optimal. But how would AnyEvent compare when used without the extra
 baggage? To explore this, I wrote the equivalent benchmark for AnyEvent.
 
 The benchmark itself creates an echo-server, and then, for 500 times,
 connects to the echo server, sends a line, waits for the reply, and then
 creates the next connection. This is a rather bad benchmark, as it doesn't
-test the efficiency of the framework, but it is a benchmark nevertheless.
+test the efficiency of the framework or much non-blocking I/O, but it is a
+benchmark nevertheless.
 
    name                    runtime
    Lambda/select           0.330 sec
@@ -1925,32 +1951,32 @@ test the efficiency of the framework, but it is a benchmark nevertheless.
    AnyEvent/EV/nb          0.068 sec
       +state machine       0.134 sec
 
-The benchmark is also a bit unfair (my fault) - the IO::Lambda
+The benchmark is also a bit unfair (my fault): the IO::Lambda/POE
 benchmarks actually make blocking connects and use 100% blocking I/O,
 defeating the purpose of an event-based solution. All of the newly
 written AnyEvent benchmarks use 100% non-blocking connects (using
 AnyEvent::Socket::tcp_connect and the asynchronous pure perl DNS
-resolver), so AnyEvent is at a disadvantage here as non-blocking connects
+resolver), so AnyEvent is at a disadvantage here, as non-blocking connects
 generally require a lot more bookkeeping and event handling than blocking
 connects (which involve a single syscall only).
 
 The last AnyEvent benchmark additionally uses L<AnyEvent::Handle>, which
-offers similar expressive power as POE and IO::Lambda (using conventional
-Perl syntax), which means both the echo server and the client are 100%
-non-blocking w.r.t. I/O, further placing it at a disadvantage.
+offers similar expressive power as POE and IO::Lambda, using conventional
+Perl syntax. This means that both the echo server and the client are 100%
+non-blocking, further placing it at a disadvantage.
 
-As you can see, AnyEvent + EV even beats the hand-optimised "raw sockets
-benchmark", while AnyEvent + its pure perl backend easily beats
-IO::Lambda and POE.
+As you can see, the AnyEvent + EV combination even beats the
+hand-optimised "raw sockets benchmark", while AnyEvent + its pure perl
+backend easily beats IO::Lambda and POE.
 
 And even the 100% non-blocking version written using the high-level (and
-slow :) L<AnyEvent::Handle> abstraction beats both POE and IO::Lambda,
-even thought it does all of DNS, tcp-connect and socket I/O in a
-non-blocking way.
+slow :) L<AnyEvent::Handle> abstraction beats both POE and IO::Lambda by a
+large margin, even though it does all of DNS, tcp-connect and socket I/O
+in a non-blocking way.
 
-The two AnyEvent benchmarks can be found as F<eg/ae0.pl> and F<eg/ae2.pl>
-in the AnyEvent distribution, the remaining benchmarks are part of the
-IO::lambda distribution and were used without any changes.
+The two AnyEvent benchmarks programs can be found as F<eg/ae0.pl> and
+F<eg/ae2.pl> in the AnyEvent distribution, the remaining benchmarks are
+part of the IO::lambda distribution and were used without any changes.
 
 
 =head1 SIGNALS
@@ -1964,6 +1990,9 @@ AnyEvent currently installs handlers for these signals:
 A handler for C<SIGCHLD> is installed by AnyEvent's child watcher
 emulation for event loops that do not support them natively. Also, some
 event loops install a similar handler.
+
+If, when AnyEvent is loaded, SIGCHLD is set to IGNORE, then AnyEvent will
+reset it to default, to avoid losing child exit statuses.
 
 =item SIGPIPE
 
@@ -1985,9 +2014,11 @@ Feel free to install your own handler, or reset it to defaults.
 
 =cut
 
+undef $SIG{CHLD}
+   if $SIG{CHLD} eq 'IGNORE';
+
 $SIG{PIPE} = sub { }
    unless defined $SIG{PIPE};
-
 
 =head1 FORK
 
@@ -2019,6 +2050,10 @@ Similar considerations apply to $ENV{PERL_ANYEVENT_VERBOSE}, as that can
 be used to probe what backend is used and gain other information (which is
 probably even less useful to an attacker than PERL_ANYEVENT_MODEL), and
 $ENV{PERL_ANYEVENT_STRICT}.
+
+Note that AnyEvent will remove I<all> environment variables starting with
+C<PERL_ANYEVENT_> from C<%ENV> when it is loaded while taint mode is
+enabled.
 
 
 =head1 BUGS

@@ -1,5 +1,12 @@
 Revision history for Perl extension AnyEvent.
 
+4.42  Fri Jun 26 08:32:18 CEST 2009
+	- preliminary and neccesarily incomplete support for IO::Async.
+	- reset SIGCHLD to DEFAULT when AnyEvent is loaded, in
+          case it was set to IGNORE, to ensure we can catch child statuses
+          even when the calling env acts stupidly.
+        - updated benchmarks with IO::Async, which performs very well.
+
 4.412 Wed Jun 24 01:35:57 CEST 2009
 	- support an "untaint" attribute for AnyEvent::DNS
           and set it on the default resolver.
