@@ -16,7 +16,7 @@ AnyEvent::Handle - non-blocking I/O on file handles via AnyEvent
 
 =cut
 
-our $VERSION = 4.45;
+our $VERSION = 4.451;
 
 =head1 SYNOPSIS
 
@@ -314,7 +314,7 @@ sub new {
 sub _shutdown {
    my ($self) = @_;
 
-   delete @$self{qw(_tw _rw _ww fh rbuf wbuf on_read _queue)};
+   delete @$self{qw(_tw _rw _ww fh wbuf on_read _queue)};
 
    &_freetls;
 }
