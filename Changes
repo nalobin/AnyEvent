@@ -1,5 +1,32 @@
 Revision history for Perl extension AnyEvent.
 
+4.8  Mon Jul  6 23:45:16 CEST 2009
+	- AnyEvent::DNS did not properly follow CNAME records with
+          uppercase targets.
+        - AnyEvent::DNS would errornously return AAAA records
+          with v4 mapped addresses (a faulty record) as ipv4 addresses,
+          causing AnyEvent::Socket to throw an exception.
+        - added new module AnyEvent::TLS for easier SSL/TLS context
+          creation, with many options including hostname verification,
+          secure default configuration, lots of documentation and,
+          predefined diffie-hellman keys for perfect forward security
+          and much more. get it while it's still fresh!
+        - use AnyEvent::TLS in AnyEvent::Handle for context management.
+	- load AnyEvent::Handle only on demand in AnyEvent::DNS,
+          so AnyEvent::Socket users have smaller memory footprint
+          in the common case.
+        - add AnyEvent::Handle->push_shutdown method.
+        - add an additional error message parameter to AnyEvent::Handle's
+          on_error callback (for TLS, $! is still available).
+        - add AnyEvent::Handle on_starttls/on_stoptls callbacks.
+        - make AnyEvent::Handle more robust against early conenction
+          failures (during new), and return C<undef> in that case
+          from the constructor.
+        - AnyEvent::Handle will now try to load only JSON::XS first,
+          then fall back to JSON.
+        - format_ipv4/format_ipv6 are now exported by default, for symmetry,
+          and because it was documented that way.
+
 4.451 Fri Jul  3 00:28:58 CEST 2009
 	- do not clear rbuf when shutting down an AnyEvent::Handle
           object - doing so breaks AnyEvent::HTTP.

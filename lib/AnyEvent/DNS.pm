@@ -34,10 +34,9 @@ use strict;
 use Socket qw(AF_INET SOCK_DGRAM SOCK_STREAM);
 
 use AnyEvent ();
-use AnyEvent::Handle ();
 use AnyEvent::Util qw(AF_INET6);
 
-our $VERSION = 4.451;
+our $VERSION = 4.8;
 
 our @DNS_FALLBACK = (v208.67.220.220, v208.67.222.222);
 
@@ -506,7 +505,7 @@ our %dec_rr = (
     13 => sub { unpack "C/a* C/a*", $_ }, # hinfo
     15 => sub { local $ofs = $ofs + 2 - length; ((unpack "n", $_), _dec_name) }, # mx
     16 => sub { unpack "(C/a*)*", $_ }, # txt
-    28 => sub { AnyEvent::Socket::format_address ($_) }, # aaaa
+    28 => sub { AnyEvent::Socket::format_ipv6 ($_) }, # aaaa
     33 => sub { local $ofs = $ofs + 6 - length; ((unpack "nnn", $_), _dec_name) }, # srv
     35 => sub { # naptr
        # requires perl 5.10, sorry
@@ -1023,6 +1022,8 @@ sub _exec {
                my ($fh) = @_
                   or return &$do_retry;
 
+               require AnyEvent::Handle;
+
                my $handle; $handle = new AnyEvent::Handle
                   fh       => $fh,
                   timeout  => $timeout,
@@ -1285,7 +1286,7 @@ sub resolve($%) {
                      or return $do_search->(); # cname chain too long
 
                   $cname = 1;
-                  $name = $rr[0][3];
+                  $name = lc $rr[0][3];
 
                } elsif ($cname) {
                   # follow the cname

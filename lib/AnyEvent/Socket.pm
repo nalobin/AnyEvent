@@ -52,6 +52,7 @@ our @EXPORT = qw(
    parse_hostport
    parse_ipv4 parse_ipv6
    parse_ip parse_address
+   format_ipv4 format_ipv6
    format_ip format_address
    address_family
    inet_aton
@@ -59,7 +60,7 @@ our @EXPORT = qw(
    tcp_connect
 );
 
-our $VERSION = 4.451;
+our $VERSION = 4.8;
 
 =item $ipn = parse_ipv4 $dotted_quad
 

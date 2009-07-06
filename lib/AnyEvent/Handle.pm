@@ -16,7 +16,7 @@ AnyEvent::Handle - non-blocking I/O on file handles via AnyEvent
 
 =cut
 
-our $VERSION = 4.451;
+our $VERSION = 4.8;
 
 =head1 SYNOPSIS
 
@@ -65,9 +65,9 @@ argument.
 
 =over 4
 
-=item B<new (%args)>
+=item $handle = B<new> AnyEvent::TLS fh => $filehandle, key => value...
 
-The constructor supports these arguments (all as key => value pairs).
+The constructor supports these arguments (all as C<< key => value >> pairs).
 
 =over 4
 
@@ -97,7 +97,7 @@ waiting for data.
 If an EOF condition has been detected but no C<on_eof> callback has been
 set, then a fatal error will be raised with C<$!> set to <0>.
 
-=item on_error => $cb->($handle, $fatal)
+=item on_error => $cb->($handle, $fatal, $message)
 
 This is the error callback, which is called when, well, some error
 occured, such as not being able to resolve the hostname, failure to
@@ -109,13 +109,19 @@ fatal errors the handle object will be shut down and will not be usable
 errors are an EOF condition with active (but unsatisifable) read watchers
 (C<EPIPE>) or I/O errors.
 
+AnyEvent::Handle tries to find an appropriate error code for you to check
+against, but in some cases (TLS errors), this does not work well. It is
+recommended to always output the C<$message> argument in human-readable
+error messages (it's usually the same as C<"$!">).
+
 Non-fatal errors can be retried by simply returning, but it is recommended
 to simply ignore this parameter and instead abondon the handle object
 when this callback is invoked. Examples of non-fatal errors are timeouts
 C<ETIMEDOUT>) or badly-formatted data (C<EBADMSG>).
 
 On callback entrance, the value of C<$!> contains the operating system
-error (or C<ENOSPC>, C<EPIPE>, C<ETIMEDOUT> or C<EBADMSG>).
+error code (or C<ENOSPC>, C<EPIPE>, C<ETIMEDOUT>, C<EBADMSG> or
+C<EPROTO>).
 
 While not mandatory, it is I<highly> recommended to set this callback, as
 you will not be notified of errors otherwise. The default simply calls
@@ -129,7 +135,7 @@ callback will only be called when at least one octet of data is in the
 read buffer).
 
 To access (and remove data from) the read buffer, use the C<< ->rbuf >>
-method or access the C<$handle->{rbuf}> member directly. Note that you
+method or access the C<< $handle->{rbuf} >> member directly. Note that you
 must not enlarge or modify the read buffer, you can only remove data at
 the beginning from it.
 
@@ -239,11 +245,24 @@ This will not work for partial TLS data that could not be encoded
 yet. This data will be lost. Calling the C<stoptls> method in time might
 help.
 
+=item peername => $string
+
+A string used to identify the remote site - usually the DNS hostname
+(I<not> IDN!) used to create the connection, rarely the IP address.
+
+Apart from being useful in error messages, this string is also used in TLS
+peername verification (see C<verify_peername> in L<AnyEvent::TLS>). This
+verification will be skipped when C<peername> is not specified or
+C<undef>.
+
 =item tls => "accept" | "connect" | Net::SSLeay::SSL object
 
 When this parameter is given, it enables TLS (SSL) mode, that means
 AnyEvent will start a TLS handshake as soon as the conenction has been
 established and will transparently encrypt/decrypt data afterwards.
+
+All TLS protocol errors will be signalled as C<EPROTO>, with an
+appropriate error message.
 
 TLS mode requires Net::SSLeay to be installed (it will be loaded
 automatically when you try to create a TLS handle): this module doesn't
@@ -257,7 +276,12 @@ mode.
 You can also provide your own TLS connection object, but you have
 to make sure that you call either C<Net::SSLeay::set_connect_state>
 or C<Net::SSLeay::set_accept_state> on it before you pass it to
-AnyEvent::Handle.
+AnyEvent::Handle. Also, this module will take ownership of this connection
+object.
+
+At some future point, AnyEvent::Handle might switch to another TLS
+implementation, then the option to use your own session object will go
+away.
 
 B<IMPORTANT:> since Net::SSLeay "objects" are really only integers,
 passing in the wrong integer will lead to certain crash. This most often
@@ -266,11 +290,47 @@ segmentation fault.
 
 See the C<< ->starttls >> method for when need to start TLS negotiation later.
 
-=item tls_ctx => $ssl_ctx
+=item tls_ctx => $anyevent_tls
 
-Use the given C<Net::SSLeay::CTX> object to create the new TLS connection
+Use the given C<AnyEvent::TLS> object to create the new TLS connection
 (unless a connection object was specified directly). If this parameter is
 missing, then AnyEvent::Handle will use C<AnyEvent::Handle::TLS_CTX>.
+
+Instead of an object, you can also specify a hash reference with C<< key
+=> value >> pairs. Those will be passed to L<AnyEvent::TLS> to create a
+new TLS context object.
+
+=item on_starttls => $cb->($handle, $success[, $error_message])
+
+This callback will be invoked when the TLS/SSL handshake has finished. If
+C<$success> is true, then the TLS handshake succeeded, otherwise it failed
+(C<on_stoptls> will not be called in this case).
+
+The session in C<< $handle->{tls} >> can still be examined in this
+callback, even when the handshake was not successful.
+
+TLS handshake failures will not cause C<on_error> to be invoked when this
+callback is in effect, instead, the error message will be passed to C<on_starttls>.
+
+Without this callback, handshake failures lead to C<on_error> being
+called, as normal.
+
+Note that you cannot call C<starttls> right again in this callback. If you
+need to do that, start an zero-second timer instead whose callback can
+then call C<< ->starttls >> again.
+
+=item on_stoptls => $cb->($handle)
+
+When a SSLv3/TLS shutdown/close notify/EOF is detected and this callback is
+set, then it will be invoked after freeing the TLS session. If it is not,
+then a TLS shutdown condition will be treated like a normal EOF condition
+on the handle.
+
+The session in C<< $handle->{tls} >> can still be examined in this
+callback.
+
+This callback will only be called on TLS shutdowns, not when the
+underlying handle signals EOF.
 
 =item json => JSON or JSON::XS object
 
@@ -289,48 +349,50 @@ use this functionality, as AnyEvent does not have a dependency itself.
 
 sub new {
    my $class = shift;
-
    my $self = bless { @_ }, $class;
 
    $self->{fh} or Carp::croak "mandatory argument fh is missing";
 
    AnyEvent::Util::fh_nonblocking $self->{fh}, 1;
 
-   $self->starttls (delete $self->{tls}, delete $self->{tls_ctx})
-      if $self->{tls};
-
    $self->{_activity} = AnyEvent->now;
    $self->_timeout;
 
-   $self->on_drain (delete $self->{on_drain}) if exists $self->{on_drain};
    $self->no_delay (delete $self->{no_delay}) if exists $self->{no_delay};
+
+   $self->starttls (delete $self->{tls}, delete $self->{tls_ctx})
+      if $self->{tls};
+
+   $self->on_drain (delete $self->{on_drain}) if $self->{on_drain};
 
    $self->start_read
       if $self->{on_read};
 
-   $self
+   $self->{fh} && $self
 }
 
 sub _shutdown {
    my ($self) = @_;
 
    delete @$self{qw(_tw _rw _ww fh wbuf on_read _queue)};
+   $self->{_eof} = 1; # tell starttls et. al to stop trying
 
    &_freetls;
 }
 
 sub _error {
-   my ($self, $errno, $fatal) = @_;
+   my ($self, $errno, $fatal, $message) = @_;
 
    $self->_shutdown
       if $fatal;
 
    $! = $errno;
+   $message ||= "$!";
 
    if ($self->{on_error}) {
-      $self->{on_error}($self, $fatal);
+      $self->{on_error}($self, $fatal, $message);
    } elsif ($self->{fh}) {
-      Carp::croak "AnyEvent::Handle uncaught error: $!";
+      Carp::croak "AnyEvent::Handle uncaught error: $message";
    }
 }
 
@@ -399,6 +461,26 @@ sub no_delay {
       local $SIG{__DIE__};
       setsockopt $_[0]{fh}, &Socket::IPPROTO_TCP, &Socket::TCP_NODELAY, int $_[1];
    };
+}
+
+=item $handle->on_starttls ($cb)
+
+Replace the current C<on_starttls> callback (see the C<on_starttls> constructor argument).
+
+=cut
+
+sub on_starttls {
+   $_[0]{on_starttls} = $_[1];
+}
+
+=item $handle->on_stoptls ($cb)
+
+Replace the current C<on_stoptls> callback (see the C<on_stoptls> constructor argument).
+
+=cut
+
+sub on_starttls {
+   $_[0]{on_stoptls} = $_[1];
 }
 
 #############################################################################
@@ -653,6 +735,31 @@ register_write_type storable => sub {
 
 =back
 
+=item $handle->push_shutdown
+
+Sometimes you know you want to close the socket after writing your data
+before it was actually written. One way to do that is to replace your
+C<on_drain> handler by a callback that shuts down the socket (and set
+C<low_water_mark> to C<0>). This method is a shorthand for just that, and
+replaces the C<on_drain> callback with:
+
+   sub { shutdown $_[0]{fh}, 1 }    # for push_shutdown
+
+This simply shuts down the write side and signals an EOF condition to the
+the peer.
+
+You can rely on the normal read queue and C<on_eof> handling
+afterwards. This is the cleanest way to close a connection.
+
+=cut
+
+sub push_shutdown {
+   my ($self) = @_;
+
+   delete $self->{low_water_mark};
+   $self->on_drain (sub { shutdown $_[0]{fh}, 1 });
+}
+
 =item AnyEvent::Handle::register_write_type type => $coderef->($handle, @args)
 
 This function (not method) lets you add your own types to C<push_write>.
@@ -809,7 +916,7 @@ sub _drain_rbuf {
       if ($self->{on_eof}) {
          $self->{on_eof}($self)
       } else {
-         $self->_error (0, 1);
+         $self->_error (0, 1, "Unexpected end-of-file");
       }
    }
 
@@ -1169,12 +1276,12 @@ the C<json> write type description, above, for an actual example.
 register_read_type json => sub {
    my ($self, $cb) = @_;
 
-   require JSON;
+   my $json = $self->{json} ||=
+      eval { require JSON::XS; JSON::XS->new->utf8 }
+         || do { require JSON; JSON->new->utf8 };
 
    my $data;
    my $rbuf = \$self->{rbuf};
-
-   my $json = $self->{json} ||= JSON->new->utf8;
 
    sub {
       my $ref = eval { $json->incr_parse ($self->{rbuf}) };
@@ -1328,7 +1435,34 @@ sub start_read {
    }
 }
 
+our $ERROR_SYSCALL;
+our $ERROR_WANT_READ;
+
+sub _tls_error {
+   my ($self, $err) = @_;
+
+   return $self->_error ($!, 1)
+      if $err == Net::SSLeay::ERROR_SYSCALL ();
+
+   my $err =Net::SSLeay::ERR_error_string (Net::SSLeay::ERR_get_error ());
+
+   # reduce error string to look less scary
+   $err =~ s/^error:[0-9a-fA-F]{8}:[^:]+:([^:]+):/\L$1: /;
+
+   if ($self->{_on_starttls}) {
+      (delete $self->{_on_starttls})->($self, undef, $err);
+      &_freetls;
+   } else {
+      &_freetls;
+      $self->_error (&Errno::EPROTO, 1, $err);
+   }
+}
+
 # poll the write BIO and send the data if applicable
+# also decode read data if possible
+# this is basiclaly our TLS state machine
+# more efficient implementations are possible with openssl,
+# but not with the buggy and incomplete Net::SSLeay.
 sub _dotls {
    my ($self) = @_;
 
@@ -1338,14 +1472,27 @@ sub _dotls {
       while (($tmp = Net::SSLeay::write ($self->{tls}, $self->{_tls_wbuf})) > 0) {
          substr $self->{_tls_wbuf}, 0, $tmp, "";
       }
+
+      $tmp = Net::SSLeay::get_error ($self->{tls}, $tmp);
+      return $self->_tls_error ($tmp)
+         if $tmp != $ERROR_WANT_READ
+            && ($tmp != $ERROR_SYSCALL || $!);
    }
 
    while (defined ($tmp = Net::SSLeay::read ($self->{tls}))) {
       unless (length $tmp) {
-         # let's treat SSL-eof as we treat normal EOF
-         delete $self->{_rw};
-         $self->{_eof} = 1;
+         $self->{_on_starttls}
+            and (delete $self->{_on_starttls})->($self, undef, "EOF during handshake"); # ???
          &_freetls;
+
+         if ($self->{on_stoptls}) {
+            $self->{on_stoptls}($self);
+            return;
+         } else {
+            # let's treat SSL-eof as we treat normal EOF
+            delete $self->{_rw};
+            $self->{_eof} = 1;
+         }
       }
 
       $self->{_tls_rbuf} .= $tmp;
@@ -1354,21 +1501,18 @@ sub _dotls {
    }
 
    $tmp = Net::SSLeay::get_error ($self->{tls}, -1);
-
-   if ($tmp != Net::SSLeay::ERROR_WANT_READ ()) {
-      if ($tmp == Net::SSLeay::ERROR_SYSCALL ()) {
-         return $self->_error ($!, 1);
-      } elsif ($tmp == Net::SSLeay::ERROR_SSL ()) {
-         return $self->_error (&Errno::EIO, 1);
-      }
-
-      # all other errors are fine for our purposes
-   }
+   return $self->_tls_error ($tmp)
+      if $tmp != $ERROR_WANT_READ
+         && ($tmp != $ERROR_SYSCALL || $!);
 
    while (length ($tmp = Net::SSLeay::BIO_read ($self->{_wbio}))) {
       $self->{wbuf} .= $tmp;
       $self->_drain_wbuf;
    }
+
+   $self->{_on_starttls}
+      and Net::SSLeay::state ($self->{tls}) == Net::SSLeay::ST_OK ()
+      and (delete $self->{_on_starttls})->($self, 1, "TLS/SSL connection established");
 }
 
 =item $handle->starttls ($tls[, $tls_ctx])
@@ -1380,17 +1524,22 @@ C<starttls>.
 The first argument is the same as the C<tls> constructor argument (either
 C<"connect">, C<"accept"> or an existing Net::SSLeay object).
 
-The second argument is the optional C<Net::SSLeay::CTX> object that is
-used when AnyEvent::Handle has to create its own TLS connection object.
+The second argument is the optional C<AnyEvent::TLS> object that is used
+when AnyEvent::Handle has to create its own TLS connection object, or
+a hash reference with C<< key => value >> pairs that will be used to
+construct a new context.
 
-The TLS connection object will end up in C<< $handle->{tls} >> after this
-call and can be used or changed to your liking. Note that the handshake
-might have already started when this function returns.
+The TLS connection object will end up in C<< $handle->{tls} >>, the TLS
+context in C<< $handle->{tls_ctx} >> after this call and can be used or
+changed to your liking. Note that the handshake might have already started
+when this function returns.
 
 If it an error to start a TLS handshake more than once per
 AnyEvent::Handle object (this is due to bugs in OpenSSL).
 
 =cut
+
+our %TLS_CACHE; #TODO not yet documented, should we?
 
 sub starttls {
    my ($self, $ssl, $ctx) = @_;
@@ -1399,16 +1548,27 @@ sub starttls {
 
    Carp::croak "it is an error to call starttls more than once on an AnyEvent::Handle object"
       if $self->{tls};
-   
-   if ($ssl eq "accept") {
-      $ssl = Net::SSLeay::new ($ctx || TLS_CTX ());
-      Net::SSLeay::set_accept_state ($ssl);
-   } elsif ($ssl eq "connect") {
-      $ssl = Net::SSLeay::new ($ctx || TLS_CTX ());
-      Net::SSLeay::set_connect_state ($ssl);
-   }
 
-   $self->{tls} = $ssl;
+   $ERROR_SYSCALL   = Net::SSLeay::ERROR_SYSCALL     ();
+   $ERROR_WANT_READ = Net::SSLeay::ERROR_WANT_READ   ();
+
+   $ctx ||= $self->{tls_ctx};
+
+   if ("HASH" eq ref $ctx) {
+      require AnyEvent::TLS;
+
+      local $Carp::CarpLevel = 1; # skip ourselves when creating a new context
+
+      if ($ctx->{cache}) {
+         my $key = $ctx+0;
+         $ctx = $TLS_CACHE{$key} ||= new AnyEvent::TLS %$ctx;
+      } else {
+         $ctx = new AnyEvent::TLS %$ctx;
+      }
+   }
+   
+   $self->{tls_ctx} = $ctx || TLS_CTX ();
+   $self->{tls}     = $ssl = $self->{tls_ctx}->_get_session ($ssl, $self, $self->{peername});
 
    # basically, this is deep magic (because SSL_read should have the same issues)
    # but the openssl maintainers basically said: "trust us, it just works".
@@ -1422,14 +1582,18 @@ sub starttls {
    # we assume that most (but not all) of this insanity only applies to non-blocking cases,
    # and we drive openssl fully in blocking mode here. Or maybe we don't - openssl seems to
    # have identity issues in that area.
-   Net::SSLeay::CTX_set_mode ($self->{tls},
-      (eval { local $SIG{__DIE__}; Net::SSLeay::MODE_ENABLE_PARTIAL_WRITE () } || 1)
-      | (eval { local $SIG{__DIE__}; Net::SSLeay::MODE_ACCEPT_MOVING_WRITE_BUFFER () } || 2));
+#   Net::SSLeay::CTX_set_mode ($ssl,
+#      (eval { local $SIG{__DIE__}; Net::SSLeay::MODE_ENABLE_PARTIAL_WRITE () } || 1)
+#      | (eval { local $SIG{__DIE__}; Net::SSLeay::MODE_ACCEPT_MOVING_WRITE_BUFFER () } || 2));
+   Net::SSLeay::CTX_set_mode ($ssl, 1|2);
 
    $self->{_rbio} = Net::SSLeay::BIO_new (Net::SSLeay::BIO_s_mem ());
    $self->{_wbio} = Net::SSLeay::BIO_new (Net::SSLeay::BIO_s_mem ());
 
    Net::SSLeay::set_bio ($ssl, $self->{_rbio}, $self->{_wbio});
+
+   $self->{_on_starttls} = sub { $_[0]{on_starttls}(@_) }
+      if $self->{on_starttls};
 
    &_dotls; # need to trigger the initial handshake
    $self->start_read; # make sure we actually do read
@@ -1452,9 +1616,9 @@ sub stoptls {
 
       &_dotls;
 
-      # we don't give a shit. no, we do, but we can't. no...
-      # we, we... have to use openssl :/
-      &_freetls;
+#      # we don't give a shit. no, we do, but we can't. no...#d#
+#      # we, we... have to use openssl :/#d#
+#      &_freetls;#d#
    }
 }
 
@@ -1463,9 +1627,9 @@ sub _freetls {
 
    return unless $self->{tls};
 
-   Net::SSLeay::free (delete $self->{tls});
+   $self->{tls_ctx}->_put_session (delete $self->{tls});
    
-   delete @$self{qw(_rbio _wbio _tls_wbuf)};
+   delete @$self{qw(_rbio _wbio _tls_wbuf _on_starttls)};
 }
 
 sub DESTROY {
@@ -1499,8 +1663,8 @@ sub DESTROY {
 =item $handle->destroy
 
 Shuts down the handle object as much as possible - this call ensures that
-no further callbacks will be invoked and resources will be freed as much
-as possible. You must not call any methods on the object afterwards.
+no further callbacks will be invoked and as many resources as possible
+will be freed. You must not call any methods on the object afterwards.
 
 Normally, you can just "forget" any references to an AnyEvent::Handle
 object and it will simply shut down. This works in fatal error and EOF
@@ -1523,36 +1687,20 @@ sub destroy {
 
 =item AnyEvent::Handle::TLS_CTX
 
-This function creates and returns the Net::SSLeay::CTX object used by
-default for TLS mode.
+This function creates and returns the AnyEvent::TLS object used by default
+for TLS mode.
 
-The context is created like this:
-
-   Net::SSLeay::load_error_strings;
-   Net::SSLeay::SSLeay_add_ssl_algorithms;
-   Net::SSLeay::randomize;
-
-   my $CTX = Net::SSLeay::CTX_new;
-
-   Net::SSLeay::CTX_set_options $CTX, Net::SSLeay::OP_ALL
+The context is created by calling L<AnyEvent::TLS> without any arguments.
 
 =cut
 
 our $TLS_CTX;
 
 sub TLS_CTX() {
-   $TLS_CTX || do {
-      require Net::SSLeay;
+   $TLS_CTX ||= do {
+      require AnyEvent::TLS;
 
-      Net::SSLeay::load_error_strings ();
-      Net::SSLeay::SSLeay_add_ssl_algorithms ();
-      Net::SSLeay::randomize ();
-
-      $TLS_CTX = Net::SSLeay::CTX_new ();
-
-      Net::SSLeay::CTX_set_options ($TLS_CTX, Net::SSLeay::OP_ALL ());
-
-      $TLS_CTX
+      new AnyEvent::TLS
    }
 }
 
@@ -1626,6 +1774,94 @@ written to the socket:
       warn "all data submitted to the kernel\n";
       undef $handle;
    });
+
+If you just want to queue some data and then signal EOF to the other side,
+consider using C<< ->push_shutdown >> instead.
+
+=item I want to contact a TLS/SSL server, I don't care about security.
+
+If your TLS server is a pure TLS server (e.g. HTTPS) that only speaks TLS,
+simply connect to it and then create the AnyEvent::Handle with the C<tls>
+parameter:
+
+   tcp_connect $host, $port, sub {
+      my ($fh) = @_;
+
+      my $handle = new AnyEvent::Handle
+         fh  => $fh,
+         tls => "connect",
+         on_error => sub { ... };
+
+      $handle->push_write (...);
+   };
+
+=item I want to contact a TLS/SSL server, I do care about security.
+
+Then you should additionally enable certificate verification, including
+peername verification, if the protocol you use supports it (see
+L<AnyEvent::TLS>, C<verify_peername>).
+
+E.g. for HTTPS:
+
+   tcp_connect $host, $port, sub {
+      my ($fh) = @_;
+
+       my $handle = new AnyEvent::Handle
+          fh       => $fh,
+          peername => $host,
+          tls      => "connect",
+          tls_ctx  => { verify => 1, verify_peername => "https" },
+          ...
+
+Note that you must specify the hostname you connected to (or whatever
+"peername" the protocol needs) as the C<peername> argument, otherwise no
+peername verification will be done.
+
+The above will use the system-dependent default set of trusted CA
+certificates. If you want to check against a specific CA, add the
+C<ca_file> (or C<ca_cert>) arguments to C<tls_ctx>:
+
+       tls_ctx  => {
+          verify          => 1,
+          verify_peername => "https",
+          ca_file         => "my-ca-cert.pem",
+       },
+
+=item I want to create a TLS/SSL server, how do I do that?
+
+Well, you first need to get a server certificate and key. You have
+three options: a) ask a CA (buy one, use cacert.org etc.) b) create a
+self-signed certificate (cheap. check the search engine of your choice,
+there are many tutorials on the net) or c) make your own CA (tinyca2 is a
+nice program for that purpose).
+
+Then create a file with your private key (in PEM format, see
+L<AnyEvent::TLS>), followed by the certificate (also in PEM format). The
+file should then look like this:
+
+   -----BEGIN RSA PRIVATE KEY-----
+   ...header data
+   ... lots of base64'y-stuff
+   -----END RSA PRIVATE KEY-----
+
+   -----BEGIN CERTIFICATE-----
+   ... lots of base64'y-stuff
+   -----END CERTIFICATE-----
+
+The important bits are the "PRIVATE KEY" and "CERTIFICATE" parts.  Then
+specify this file as C<cert_file>:
+
+   tcp_server undef, $port, sub {
+      my ($fh) = @_;
+
+      my $handle = new AnyEvent::Handle
+         fh       => $fh,
+         tls      => "accept",
+         tls_ctx  => { cert_file => "my-server-keycert.pem" },
+         ...
+
+When you have intermediate CA certificates that your clients might not
+know about, just append them to the C<cert_file>.
 
 =back
 
