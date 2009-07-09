@@ -16,12 +16,43 @@ AnyEvent::TLS - SSLv2/SSLv3/TLSv1 contexts for use in AnyEvent::Handle
 
 =cut
 
-our $VERSION = 4.8;
+our $VERSION = 4.81;
 
 =head1 SYNOPSIS
 
+   # via AnyEvent::Handle
+
    use AnyEvent;
    use AnyEvent::Handle;
+   use AnyEvent::Socket;
+
+   # ssl-connect
+   tcp_connect $host, $port, sub {
+      my ($fh) = @_;
+
+       my $handle = new AnyEvent::Handle
+          fh       => $fh,
+          peername => $host,
+          tls      => "connect",
+          tls_ctx  => { verify => 1, verify_peername => "https" },
+          ...
+
+   # ssl-server
+   tcp_server undef, $port, sub {
+      my ($fh) = @_;
+
+      my $handle = new AnyEvent::Handle
+         fh       => $fh,
+         tls      => "accept",
+         tls_ctx  => { cert_file => "my-server-keycert.pem" },
+         ...
+
+   # directly
+
+   my $tls = new AnyEvent::TLS
+      verify => 1,
+      verify_peername => "ldaps",
+      ca_file => "/etc/cacertificates.pem";
 
 =head1 DESCRIPTION
 
@@ -141,7 +172,8 @@ its CA certificate chain - that means there must be a signing chain from
 the peer certificate to any of the CA certificates you trust locally, as
 specified by the C<ca_file> and/or C<ca_path> and/or C<ca_cert> parameters
 (or the system default CA repository, if all of those parameters are
-missing).
+missing - see also the L<AnyEvent> manpage for the description of
+PERL_ANYEVENT_CA_FILE).
 
 Other basic checks, such as checking the validity period, will also be
 done, as well as optional peername/hostname/common name verification
@@ -623,6 +655,12 @@ sub new {
          if (exists $arg{ca_file} or exists $arg{ca_path}) {
             Net::SSLeay::CTX_load_verify_locations ($ctx, $arg{ca_file}, $arg{ca_path});
          }
+      } elsif (exists $ENV{PERL_ANYEVENT_CA_FILE} or exists $ENV{PERL_ANYEVENT_CA_PATH}) {
+         Net::SSLeay::CTX_load_verify_locations (
+            $ctx,
+            $ENV{PERL_ANYEVENT_CA_FILE},
+            $ENV{PERL_ANYEVENT_CA_PATH},
+         );
       } else {
          # else fall back to defaults
          Net::SSLeay::CTX_set_default_verify_paths ($ctx);

@@ -113,7 +113,7 @@ use Scalar::Util qw(weaken);
 use AnyEvent ();
 use AnyEvent::Util ();
 
-our $VERSION = 4.8;
+our $VERSION = 4.81;
 
 our ($NOW, $MNOW);
 
@@ -255,6 +255,7 @@ sub io {
    my ($class, %arg) = @_;
 
    my $fd = fileno $arg{fh};
+   defined $fd or $fd = $arg{fh};
 
    my $self = bless [
       $fd,

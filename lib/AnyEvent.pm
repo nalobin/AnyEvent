@@ -178,7 +178,7 @@ declared.
 You can create an I/O watcher by calling the C<< AnyEvent->io >> method
 with the following mandatory key-value pairs as arguments:
 
-C<fh> is the Perl I<file handle> (I<not> file descriptor) to watch
+C<fh> is the Perl I<file handle> (or a naked file descriptor) to watch
 for events (AnyEvent might or might not keep a reference to this file
 handle). Note that only file handles pointing to things for which
 non-blocking operation makes sense are allowed. This includes sockets,
@@ -742,54 +742,116 @@ is guaranteed not to block.
 
 =back
 
+=head1 SUPPORTED EVENT LOOPS/BACKENDS
+
+The available backend classes are (every class has its own manpage):
+
+=over 4
+
+=item Backends that are autoprobed when no other event loop can be found.
+
+EV is the preferred backend when no other event loop seems to be in
+use. If EV is not installed, then AnyEvent will try Event, and, failing
+that, will fall back to its own pure-perl implementation, which is
+available everywhere as it comes with AnyEvent itself.
+
+   AnyEvent::Impl::EV        based on EV (interface to libev, best choice).
+   AnyEvent::Impl::Event     based on Event, very stable, few glitches.
+   AnyEvent::Impl::Perl      pure-perl implementation, fast and portable.
+
+=item Backends that are transparently being picked up when they are used.
+
+These will be used when they are currently loaded when the first watcher
+is created, in which case it is assumed that the application is using
+them. This means that AnyEvent will automatically pick the right backend
+when the main program loads an event module before anything starts to
+create watchers. Nothing special needs to be done by the main program.
+
+   AnyEvent::Impl::Glib      based on Glib, slow but very stable.
+   AnyEvent::Impl::Tk        based on Tk, very broken.
+   AnyEvent::Impl::EventLib  based on Event::Lib, leaks memory and worse.
+   AnyEvent::Impl::POE       based on POE, very slow, some limitations.
+
+=item Backends with special needs.
+
+Qt requires the Qt::Application to be instantiated first, but will
+otherwise be picked up automatically. As long as the main program
+instantiates the application before any AnyEvent watchers are created,
+everything should just work.
+
+   AnyEvent::Impl::Qt        based on Qt.
+
+Support for IO::Async can only be partial, as it is too broken and
+architecturally limited to even support the AnyEvent API. It also
+is the only event loop that needs the loop to be set explicitly, so
+it can only be used by a main program knowing about AnyEvent. See
+L<AnyEvent::Impl::Async> for the gory details.
+
+   AnyEvent::Impl::IOAsync   based on IO::Async, cannot be autoprobed.
+
+=item Event loops that are indirectly supported via other backends.
+
+Some event loops can be supported via other modules:
+
+There is no direct support for WxWidgets (L<Wx>) or L<Prima>.
+
+B<WxWidgets> has no support for watching file handles. However, you can
+use WxWidgets through the POE adaptor, as POE has a Wx backend that simply
+polls 20 times per second, which was considered to be too horrible to even
+consider for AnyEvent.
+
+B<Prima> is not supported as nobody seems to be using it, but it has a POE
+backend, so it can be supported through POE.
+
+AnyEvent knows about both L<Prima> and L<Wx>, however, and will try to
+load L<POE> when detecting them, in the hope that POE will pick them up,
+in which case everything will be automatic.
+
+=back
+
 =head1 GLOBAL VARIABLES AND FUNCTIONS
+
+These are not normally required to use AnyEvent, but can be useful to
+write AnyEvent extension modules.
 
 =over 4
 
 =item $AnyEvent::MODEL
 
-Contains C<undef> until the first watcher is being created. Then it
-contains the event model that is being used, which is the name of the
-Perl class implementing the model. This class is usually one of the
-C<AnyEvent::Impl:xxx> modules, but can be any other class in the case
-AnyEvent has been extended at runtime (e.g. in I<rxvt-unicode>).
+Contains C<undef> until the first watcher is being created, before the
+backend has been autodetected.
 
-The known classes so far are:
-
-   AnyEvent::Impl::EV        based on EV (an interface to libev, best choice).
-   AnyEvent::Impl::Event     based on Event, second best choice.
-   AnyEvent::Impl::Perl      pure-perl implementation, fast and portable.
-   AnyEvent::Impl::Glib      based on Glib, third-best choice.
-   AnyEvent::Impl::Tk        based on Tk, very bad choice.
-   AnyEvent::Impl::Qt        based on Qt, cannot be autoprobed (see its docs).
-   AnyEvent::Impl::EventLib  based on Event::Lib, leaks memory and worse.
-   AnyEvent::Impl::POE       based on POE, not generic enough for full support.
-
-   # warning, support for IO::Async is only partial, as it is too broken
-   # and limited toe ven support the AnyEvent API. See AnyEvent::Impl::Async.
-   AnyEvent::Impl::IOAsync   based on IO::Async, cannot be autoprobed (see its docs).
-
-There is no support for WxWidgets, as WxWidgets has no support for
-watching file handles. However, you can use WxWidgets through the
-POE Adaptor, as POE has a Wx backend that simply polls 20 times per
-second, which was considered to be too horrible to even consider for
-AnyEvent. Likewise, other POE backends can be used by AnyEvent by using
-it's adaptor.
-
-AnyEvent knows about L<Prima> and L<Wx> and will try to use L<POE> when
-autodetecting them.
+Afterwards it contains the event model that is being used, which is the
+name of the Perl class implementing the model. This class is usually one
+of the C<AnyEvent::Impl:xxx> modules, but can be any other class in the
+case AnyEvent has been extended at runtime (e.g. in I<rxvt-unicode> it
+will be C<urxvt::anyevent>).
 
 =item AnyEvent::detect
 
 Returns C<$AnyEvent::MODEL>, forcing autodetection of the event model
 if necessary. You should only call this function right before you would
 have created an AnyEvent watcher anyway, that is, as late as possible at
-runtime.
+runtime, and not e.g. while initialising of your module.
+
+If you need to do some initialisation before AnyEvent watchers are
+created, use C<post_detect>.
 
 =item $guard = AnyEvent::post_detect { BLOCK }
 
 Arranges for the code block to be executed as soon as the event model is
 autodetected (or immediately if this has already happened).
+
+The block will be executed I<after> the actual backend has been detected
+(C<$AnyEvent::MODEL> is set), but I<before> any watchers have been
+created, so it is possible to e.g. patch C<@AnyEvent::ISA> or do
+other initialisations - see the sources of L<AnyEvent::Strict> or
+L<AnyEvent::AIO> to see how this is used.
+
+The most common usage is to create some global watchers, without forcing
+event module detection too early, for example, L<AnyEvent::AIO> creates
+and installs the global L<IO::AIO> watcher in a C<post_detect> block to
+avoid autodetecting the event module at load time.
 
 If called in scalar or list context, then it creates and returns an object
 that automatically removes the callback again when it is destroyed. See
@@ -802,10 +864,16 @@ before or after loading AnyEvent), then they will called directly after
 the event loop has been chosen.
 
 You should check C<$AnyEvent::MODEL> before adding to this array, though:
-if it contains a true value then the event loop has already been detected,
-and the array will be ignored.
+if it is defined then the event loop has already been detected, and the
+array will be ignored.
 
-Best use C<AnyEvent::post_detect { BLOCK }> instead.
+Best use C<AnyEvent::post_detect { BLOCK }> when your application allows
+it,as it takes care of these details.
+
+This variable is mainly useful for modules that can do something useful
+when AnyEvent is used and thus want to know when it is initialised, but do
+not need to even load it by default. This array provides the means to hook
+into AnyEvent passively, without loading it.
 
 =back
 
@@ -870,9 +938,9 @@ exit cleanly.
 =head1 OTHER MODULES
 
 The following is a non-exhaustive list of additional modules that use
-AnyEvent and can therefore be mixed easily with other AnyEvent modules
-in the same program. Some of the modules come with AnyEvent, some are
-available via CPAN.
+AnyEvent as a client and can therefore be mixed easily with other AnyEvent
+modules and other event loops in the same program. Some of the modules
+come with AnyEvent, most are available via CPAN.
 
 =over 4
 
@@ -891,7 +959,7 @@ connections or tcp servers, with IPv6 and SRV record support and more.
 
 Provide read and write buffers, manages watchers for reads and writes,
 supports raw and formatted I/O, I/O queued and fully transparent and
-non-blocking SSL/TLS.
+non-blocking SSL/TLS (via L<AnyEvent::TLS>.
 
 =item L<AnyEvent::DNS>
 
@@ -929,18 +997,19 @@ L<BDB> and AnyEvent together.
 
 A non-blocking interface to gpsd, a daemon delivering GPS information.
 
-=item L<AnyEvent::IGS>
-
-A non-blocking interface to the Internet Go Server protocol (used by
-L<App::IGS>).
-
 =item L<AnyEvent::IRC>
 
 AnyEvent based IRC client module family (replacing the older Net::IRC3).
 
-=item L<Net::XMPP2>
+=item L<AnyEvent::XMPP>
 
-AnyEvent based XMPP (Jabber protocol) module family.
+AnyEvent based XMPP (Jabber protocol) module family (replacing the older
+Net::XMPP2>.
+
+=item L<AnyEvent::IGS>
+
+A non-blocking interface to the Internet Go Server protocol (used by
+L<App::IGS>).
 
 =item L<Net::FCP>
 
@@ -955,10 +1024,6 @@ High level API for event-based execution flow control.
 
 Has special support for AnyEvent via L<Coro::AnyEvent>.
 
-=item L<IO::Lambda>
-
-The lambda approach to I/O - don't ask, look there. Can use AnyEvent.
-
 =back
 
 =cut
@@ -970,7 +1035,7 @@ use strict qw(vars subs);
 
 use Carp;
 
-our $VERSION = 4.8;
+our $VERSION = 4.81;
 our $MODEL;
 
 our $AUTOLOAD;
@@ -1006,14 +1071,14 @@ my @models = (
    # everything below here will not be autoprobed
    # as the pureperl backend should work everywhere
    # and is usually faster
-   [Tk::                   => AnyEvent::Impl::Tk::],       # crashes with many handles
    [Glib::                 => AnyEvent::Impl::Glib::],     # becomes extremely slow with many watchers
    [Event::Lib::           => AnyEvent::Impl::EventLib::], # too buggy
-   [Qt::                   => AnyEvent::Impl::Qt::],       # requires special main program
+   [Tk::                   => AnyEvent::Impl::Tk::],       # crashes with many handles
    [POE::Kernel::          => AnyEvent::Impl::POE::],      # lasciate ogni speranza
+   [Qt::                   => AnyEvent::Impl::Qt::],       # requires special main program
    [Wx::                   => AnyEvent::Impl::POE::],
    [Prima::                => AnyEvent::Impl::POE::],
-   # IO::Async is just too broken - we would need workaorunds for its
+   # IO::Async is just too broken - we would need workarounds for its
    # byzantine signal and broken child handling, among others.
    # IO::Async is rather hard to detect, as it doesn't have any
    # obvious default class.
@@ -1125,12 +1190,10 @@ sub _dupfh($$;$$) {
    my ($poll, $fh, $r, $w) = @_;
 
    # cygwin requires the fh mode to be matching, unix doesn't
-   my ($rw, $mode) = $poll eq "r" ? ($r, "<")
-                   : $poll eq "w" ? ($w, ">")
-                   : Carp::croak "AnyEvent->io requires poll set to either 'r' or 'w'";
+   my ($rw, $mode) = $poll eq "r" ? ($r, "<") : ($w, ">");
 
-   open my $fh2, "$mode&" . fileno $fh
-      or die "cannot dup() filehandle: $!,";
+   open my $fh2, "$mode&", $fh
+      or die "AnyEvent->io: cannot dup() filehandle in mode '$poll': $!,";
 
    # we assume CLOEXEC is already set by perl in all important cases
 
@@ -1472,6 +1535,25 @@ EDNS0 in its DNS requests.
 
 The maximum number of child processes that C<AnyEvent::Util::fork_call>
 will create in parallel.
+
+=item C<PERL_ANYEVENT_MAX_OUTSTANDING_DNS>
+
+The default value for the C<max_outstanding> parameter for the default DNS
+resolver - this is the maximum number of parallel DNS requests that are
+sent to the DNS server.
+
+=item C<PERL_ANYEVENT_RESOLV_CONF>
+
+The file to use instead of F</etc/resolv.conf> (or OS-specific
+configuration) in the default resolver. When set to the empty string, no
+default config will be used.
+
+=item C<PERL_ANYEVENT_CA_FILE>, C<PERL_ANYEVENT_CA_PATH>.
+
+When neither C<ca_file> nor C<ca_path> was specified during
+L<AnyEvent::TLS> context creation, and either of these environment
+variables exist, they will be used to specify CA certificate locations
+instead of a system-dependent default.
 
 =back
 
@@ -2104,16 +2186,18 @@ L<Glib>, L<Tk>, L<Event::Lib>, L<Qt>, L<POE>.
 Implementations: L<AnyEvent::Impl::EV>, L<AnyEvent::Impl::Event>,
 L<AnyEvent::Impl::Glib>, L<AnyEvent::Impl::Tk>, L<AnyEvent::Impl::Perl>,
 L<AnyEvent::Impl::EventLib>, L<AnyEvent::Impl::Qt>,
-L<AnyEvent::Impl::POE>.
+L<AnyEvent::Impl::POE>, L<AnyEvent::Impl::IOAsync>.
 
 Non-blocking file handles, sockets, TCP clients and
-servers: L<AnyEvent::Handle>, L<AnyEvent::Socket>.
+servers: L<AnyEvent::Handle>, L<AnyEvent::Socket>, L<AnyEvent::TLS>.
 
 Asynchronous DNS: L<AnyEvent::DNS>.
 
-Coroutine support: L<Coro>, L<Coro::AnyEvent>, L<Coro::EV>, L<Coro::Event>,
+Coroutine support: L<Coro>, L<Coro::AnyEvent>, L<Coro::EV>,
+L<Coro::Event>,
 
-Nontrivial usage examples: L<Net::FCP>, L<Net::XMPP2>, L<AnyEvent::DNS>.
+Nontrivial usage examples: L<AnyEvent::GPSD>, L<AnyEvent::XMPP>,
+L<AnyEvent::HTTP>.
 
 
 =head1 AUTHOR

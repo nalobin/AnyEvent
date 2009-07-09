@@ -1,5 +1,20 @@
 Revision history for Perl extension AnyEvent.
 
+4.81 Thu Jul  9 10:30:30 CEST 2009
+        - AnyEvent::Handle didn't properly diagnose write errors
+          (it expected -1 from syswrite, how lame... :).
+	- support file descriptors in addition to file handles
+          in AnyEvent->io.
+	- new env variables: PERL_ANYEVENT_RESOLV_CONF,
+          PERL_ANYEVENT_MAX_OUTSTANDING_DNS, PERL_ANYEVENT_CA_FILE
+          and PERL_ANYEVENT_CA_PATH.
+        - provide a sensible synopsis section for AnyEvent::TLS.
+        - add a "supported backends" section to the manpage.
+        - added simple io watcher test to testsuite, using a
+          portable_socketpair.
+        - tried to improve the stability of the Event::Lib backend,
+          YMMV.
+
 4.8  Mon Jul  6 23:45:16 CEST 2009
 	- AnyEvent::DNS did not properly follow CNAME records with
           uppercase targets.

@@ -16,7 +16,7 @@ AnyEvent::Handle - non-blocking I/O on file handles via AnyEvent
 
 =cut
 
-our $VERSION = 4.8;
+our $VERSION = 4.81;
 
 =head1 SYNOPSIS
 
@@ -589,7 +589,7 @@ sub _drain_wbuf {
       my $cb = sub {
          my $len = syswrite $self->{fh}, $self->{wbuf};
 
-         if ($len >= 0) {
+         if (defined $len) {
             substr $self->{wbuf}, 0, $len, "";
 
             $self->{_activity} = AnyEvent->now;
