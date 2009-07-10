@@ -34,16 +34,11 @@ use base 'Exporter';
 our @EXPORT = qw(fh_nonblocking guard fork_call portable_pipe portable_socketpair);
 our @EXPORT_OK = qw(AF_INET6 WSAEWOULDBLOCK WSAEINPROGRESS WSAEINVAL WSAWOULDBLOCK);
 
-our $VERSION = 4.81;
+our $VERSION = 4.82;
 
 BEGIN {
    my $posix = 1 * eval { local $SIG{__DIE__}; require POSIX };
    eval "sub POSIX() { $posix }";
-}
-
-BEGIN {
-   # TODO remove this once not used anymore
-   *socket_inet_aton = \&Socket::inet_aton; # take a copy, in case Coro::LWP overrides it
 }
 
 BEGIN {
@@ -418,6 +413,23 @@ BEGIN {
          bless \(my $cb = shift), "AnyEvent::Util::guard"
       }
    }
+}
+
+#############################################################################
+
+our %SIGNAME2NUM;
+
+sub sig2num($) {
+   return shift if $_[0] > 0;
+
+   unless (scalar keys %SIGNAME2NUM) {
+      require Config;
+
+      @SIGNAME2NUM{ split ' ', $Config::Config{sig_name} }
+                  = split ' ', $Config::Config{sig_num};
+   }
+
+   $SIGNAME2NUM{+shift}
 }
 
 1;
