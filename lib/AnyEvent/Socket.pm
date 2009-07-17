@@ -49,6 +49,7 @@ use AnyEvent::DNS ();
 use base 'Exporter';
 
 our @EXPORT = qw(
+   getprotobyname
    parse_hostport
    parse_ipv4 parse_ipv6
    parse_ip parse_address
@@ -60,7 +61,7 @@ our @EXPORT = qw(
    tcp_connect
 );
 
-our $VERSION = 4.82;
+our $VERSION = 4.83;
 
 =item $ipn = parse_ipv4 $dotted_quad
 
@@ -180,6 +181,32 @@ sub parse_address($) {
 }
 
 *aton = \&parse_address;
+
+=item ($name, $aliases, $proto) = getprotobyname $name
+
+Works like the builtin function of the same name, except it tries hard to
+work even on broken platforms (well, that's windows), where getprotobyname
+is traditionally very unreliable.
+
+=cut
+
+# microsoft can't even get getprotobyname working (the etc/protocols file
+# gets lost fairly often on windows), so we have to hardcode some common
+# protocol numbers ourselves.
+our %PROTO_BYNAME;
+
+$PROTO_BYNAME{tcp}  = Socket::IPPROTO_TCP () if defined &Socket::IPPROTO_TCP;
+$PROTO_BYNAME{udp}  = Socket::IPPROTO_UDP () if defined &Socket::IPPROTO_UDP;
+$PROTO_BYNAME{icmp} = Socket::IPPROTO_ICMP() if defined &Socket::IPPROTO_ICMP;
+
+sub getprotobyname($) {
+   my $name = lc shift;
+
+   defined (my $proton = $PROTO_BYNAME{$name} || (getprotobyname $name)[2])
+      or return;
+
+   ($name, uc $name, $proton)
+}
 
 =item ($host, $service) = parse_hostport $string[, $default_service]
 
@@ -501,15 +528,6 @@ Example:
 
 =cut
 
-# microsoft can't even get getprotobyname working (the etc/protocols file
-# gets lost fairly often on windows), so we have to hardcode some common
-# protocol numbers ourselves.
-our %PROTO_BYNAME;
-
-$PROTO_BYNAME{tcp}  = &Socket::IPPROTO_TCP  if defined &Socket::IPPROTO_TCP;
-$PROTO_BYNAME{udp}  = &Socket::IPPROTO_UDP  if defined &Socket::IPPROTO_UDP;
-$PROTO_BYNAME{icmp} = &Socket::IPPROTO_ICMP if defined &Socket::IPPROTO_ICMP;
-
 sub resolve_sockaddr($$$$$$) {
    my ($node, $service, $proto, $family, $type, $cb) = @_;
 
@@ -535,7 +553,7 @@ sub resolve_sockaddr($$$$$$) {
    $proto ||= "tcp";
    $type  ||= $proto eq "udp" ? SOCK_DGRAM : SOCK_STREAM;
 
-   my $proton = $PROTO_BYNAME{lc $proto} || (getprotobyname $proto)[2]
+   my $proton = getprotobyname $proto
       or Carp::croak "$proto: protocol unknown";
 
    my $port;
@@ -714,8 +732,12 @@ to 15 seconds.
          my $handle; # avoid direct assignment so on_eof has it in scope.
          $handle = new AnyEvent::Handle
             fh     => $fh,
+            on_error => sub {
+               warn "error $_[2]\n";
+               $_[0]->destroy;
+            },
             on_eof => sub {
-               undef $handle; # keep it alive till eof
+               $handle->destroy; # destroy handle
                warn "done.\n";
             };
 
@@ -764,10 +786,7 @@ sub tcp_connect($$$;$) {
          return unless exists $state{fh};
 
          my $target = shift @target
-            or do {
-               %state = ();
-               return $connect->();
-            };
+            or return (%state = (), $connect->());
 
          my ($domain, $type, $proto, $sockaddr) = @$target;
 
@@ -782,19 +801,18 @@ sub tcp_connect($$$;$) {
          $timeout ||= 30 if AnyEvent::WIN32;
 
          $state{to} = AnyEvent->timer (after => $timeout, cb => sub {
-            $! = &Errno::ETIMEDOUT;
+            $! = Errno::ETIMEDOUT;
             $state{next}();
          }) if $timeout;
 
          # called when the connect was successful, which,
          # in theory, could be the case immediately (but never is in practise)
          $state{connected} = sub {
-            delete $state{ww};
-            delete $state{to};
-
             # we are connected, or maybe there was an error
             if (my $sin = getpeername $state{fh}) {
                my ($port, $host) = unpack_sockaddr $sin;
+
+               delete $state{ww}; delete $state{to};
 
                my $guard = guard { %state = () };
 
@@ -804,7 +822,12 @@ sub tcp_connect($$$;$) {
                });
             } else {
                # dummy read to fetch real error code
-               sysread $state{fh}, my $buf, 1 if $! == &Errno::ENOTCONN;
+               sysread $state{fh}, my $buf, 1 if $! == Errno::ENOTCONN;
+
+               return if $! == Errno::EAGAIN; # skip spurious wake-ups
+
+               delete $state{ww}; delete $state{to};
+
                $state{next}();
             }
          };
@@ -812,8 +835,8 @@ sub tcp_connect($$$;$) {
          # now connect       
          if (connect $state{fh}, $sockaddr) {
             $state{connected}->();
-         } elsif ($! == &Errno::EINPROGRESS # POSIX
-                  || $! == &Errno::EWOULDBLOCK
+         } elsif ($! == Errno::EINPROGRESS # POSIX
+                  || $! == Errno::EWOULDBLOCK
                   # WSAEINPROGRESS intentionally not checked - it means something else entirely
                   || $! == AnyEvent::Util::WSAEINVAL # not convinced, but doesn't hurt
                   || $! == AnyEvent::Util::WSAEWOULDBLOCK) {
@@ -823,7 +846,7 @@ sub tcp_connect($$$;$) {
          }
       };
 
-      $! = &Errno::ENXIO;
+      $! = Errno::ENXIO;
       $state{next}();
    };
 

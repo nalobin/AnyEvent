@@ -148,6 +148,10 @@ it cannot guarantee delivery.
 How one manages to have such a glaring bug in an event loop after ten
 years of development escapes me.
 
+(There are more annoying bugs, for example, POE runs C<waitpid>
+unconditionally on finalizing, so your program will hang until all child
+processes have exited.)
+
 =item Documentation Quality
 
 At the time of this writing, POE was in its tenth year. Still, its
@@ -259,6 +263,12 @@ POE-compatible way (bug-for-bug compatible even), without forcing your
 module to use POE - it is still open to better event models, of which
 there are plenty.
 
+Oh, and one other positive thing:
+
+   RUNNING_IN_HELL
+
+POE knows about the nature of the beast!
+
 =cut
 
 package AnyEvent::Impl::POE;
@@ -272,11 +282,19 @@ use POE;
 # if POE is already running
 if (${ $poe_kernel->[POE::Kernel::KR_RUN] } && POE::Kernel::KR_RUN_CALLED) {
     print STDERR <<EOF;
-POE is going to complain about
- Sessions were started, but POE::Kernel's run() method was never...
-Try putting:
- use AnyEvent::Impl::POE;
-at the very top of your main program to suppress these spurious warnings.
+
+***
+*** POE is going to complain about:
+***
+***    Sessions were started, but POE::Kernel's run() method was never...
+***
+*** Try putting:
+***
+***    use AnyEvent::Impl::POE;
+***
+*** at the very top of your main program to suppress these spurious warnings.
+***
+
 EOF
 } else {
    # workaround to suppress noise

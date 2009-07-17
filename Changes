@@ -1,5 +1,17 @@
 Revision history for Perl extension AnyEvent.
 
+4.83 Fri Jul 17 16:56:26 CEST 2009
+	- implement AnyEvent::Socket::getprotobyname.
+	- AnyEvent::CondVar's will now detect recursive blocking
+          waits and will croak, as too many people fall into
+          this trap.
+        - AnyEvent::Handle will now call ->destroy on itself after
+          executing the on_error callback, instead of doing some
+          half-baked internal shutdown, for fatal errors.
+        - clarify on_eof behaviour w.r.t. the read queue and
+          on_read callbacks.
+	- ignore some possible spurious wake-ups in tcp_connect.
+
 4.82 Sat Jul 11 00:34:55 CEST 2009
 	- POE and Event backends didn't accept some callable objects as 
           callbacks.

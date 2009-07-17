@@ -16,7 +16,7 @@ AnyEvent::Handle - non-blocking I/O on file handles via AnyEvent
 
 =cut
 
-our $VERSION = 4.82;
+our $VERSION = 4.83;
 
 =head1 SYNOPSIS
 
@@ -25,21 +25,22 @@ our $VERSION = 4.82;
 
    my $cv = AnyEvent->condvar;
 
-   my $handle =
-      AnyEvent::Handle->new (
-         fh => \*STDIN,
-         on_eof => sub {
-            $cv->send;
-         },
+   my $hdl; $hdl = new AnyEvent::Handle
+      fh => \*STDIN,
+      on_error => sub {
+         my ($hdl, $fatal, $msg) = @_;
+         warn "got error $msg\n";
+         $hdl->destroy;
+         $cv->send;
       );
 
    # send some request line
-   $handle->push_write ("getinfo\015\012");
+   $hdl->push_write ("getinfo\015\012");
 
    # read the response line
-   $handle->push_read (line => sub {
-      my ($handle, $line) = @_;
-      warn "read line <$line>\n";
+   $hdl->push_read (line => sub {
+      my ($hdl, $line) = @_;
+      warn "got line <$line>\n";
       $cv->send;
    });
 
@@ -83,16 +84,14 @@ that mode.
 
 Set the callback to be called when an end-of-file condition is detected,
 i.e. in the case of a socket, when the other side has closed the
-connection cleanly.
+connection cleanly, and there are no outstanding read requests in the
+queue (if there are read requests, then an EOF counts as an unexpected
+connection close and will be flagged as an error).
 
 For sockets, this just means that the other side has stopped sending data,
 you can still try to write data, and, in fact, one can return from the EOF
 callback and continue writing data, as only the read part has been shut
 down.
-
-While not mandatory, it is I<highly> recommended to set an EOF callback,
-otherwise you might end up with a closed socket while you are still
-waiting for data.
 
 If an EOF condition has been detected but no C<on_eof> callback has been
 set, then a fatal error will be raised with C<$!> set to <0>.
@@ -104,10 +103,10 @@ occured, such as not being able to resolve the hostname, failure to
 connect or a read error.
 
 Some errors are fatal (which is indicated by C<$fatal> being true). On
-fatal errors the handle object will be shut down and will not be usable
-(but you are free to look at the current C<< ->rbuf >>). Examples of fatal
-errors are an EOF condition with active (but unsatisifable) read watchers
-(C<EPIPE>) or I/O errors.
+fatal errors the handle object will be destroyed (by a call to C<< ->
+destroy >>) after invoking the error callback (which means you are free to
+examine the handle object). Examples of fatal errors are an EOF condition
+with active (but unsatisifable) read watchers (C<EPIPE>) or I/O errors.
 
 AnyEvent::Handle tries to find an appropriate error code for you to check
 against, but in some cases (TLS errors), this does not work well. It is
@@ -143,6 +142,11 @@ When an EOF condition is detected then AnyEvent::Handle will first try to
 feed all the remaining data to the queued callbacks and C<on_read> before
 calling the C<on_eof> callback. If no progress can be made, then a fatal
 error will be raised (with C<$!> set to C<EPIPE>).
+
+Note that, unlike requests in the read queue, an C<on_read> callback
+doesn't mean you I<require> some data: if there is an EOF and there
+are outstanding read requests then an error will be flagged. With an
+C<on_read> callback, the C<on_eof> callback will be invoked.
 
 =item on_drain => $cb->($handle)
 
@@ -371,27 +375,26 @@ sub new {
    $self->{fh} && $self
 }
 
-sub _shutdown {
-   my ($self) = @_;
-
-   delete @$self{qw(_tw _rw _ww fh wbuf on_read _queue)};
-   $self->{_eof} = 1; # tell starttls et. al to stop trying
-
-   &_freetls;
-}
+#sub _shutdown {
+#   my ($self) = @_;
+#
+#   delete @$self{qw(_tw _rw _ww fh wbuf on_read _queue)};
+#   $self->{_eof} = 1; # tell starttls et. al to stop trying
+#
+#   &_freetls;
+#}
 
 sub _error {
    my ($self, $errno, $fatal, $message) = @_;
-
-   $self->_shutdown
-      if $fatal;
 
    $! = $errno;
    $message ||= "$!";
 
    if ($self->{on_error}) {
       $self->{on_error}($self, $fatal, $message);
+      $self->destroy if $fatal;
    } elsif ($self->{fh}) {
+      $self->destroy;
       Carp::croak "AnyEvent::Handle uncaught error: $message";
    }
 }
@@ -516,7 +519,7 @@ sub _timeout {
          if ($self->{on_timeout}) {
             $self->{on_timeout}($self);
          } else {
-            $self->_error (&Errno::ETIMEDOUT);
+            $self->_error (Errno::ETIMEDOUT);
          }
 
          # callback could have changed timeout value, optimise
@@ -868,7 +871,7 @@ sub _drain_rbuf {
       defined $self->{rbuf_max}
       && $self->{rbuf_max} < length $self->{rbuf}
    ) {
-      $self->_error (&Errno::ENOSPC, 1), return;
+      $self->_error (Errno::ENOSPC, 1), return;
    }
 
    while () {
@@ -882,7 +885,7 @@ sub _drain_rbuf {
          unless ($cb->($self)) {
             if ($self->{_eof}) {
                # no progress can be made (not enough data and no data forthcoming)
-               $self->_error (&Errno::EPIPE, 1), return;
+               $self->_error (Errno::EPIPE, 1), return;
             }
 
             unshift @{ $self->{_queue} }, $cb;
@@ -900,7 +903,7 @@ sub _drain_rbuf {
          ) {
             # no further data will arrive
             # so no progress can be made
-            $self->_error (&Errno::EPIPE, 1), return
+            $self->_error (Errno::EPIPE, 1), return
                if $self->{_eof};
 
             last; # more data might arrive
@@ -1160,7 +1163,7 @@ register_read_type regex => sub {
       
       # reject
       if ($reject && $$rbuf =~ $reject) {
-         $self->_error (&Errno::EBADMSG);
+         $self->_error (Errno::EBADMSG);
       }
 
       # skip
@@ -1186,7 +1189,7 @@ register_read_type netstring => sub {
    sub {
       unless ($_[0]{rbuf} =~ s/^(0|[1-9][0-9]*)://) {
          if ($_[0]{rbuf} =~ /[^0-9]/) {
-            $self->_error (&Errno::EBADMSG);
+            $self->_error (Errno::EBADMSG);
          }
          return;
       }
@@ -1199,7 +1202,7 @@ register_read_type netstring => sub {
             if ($_[1] eq ",") {
                $cb->($_[0], $string);
             } else {
-               $self->_error (&Errno::EBADMSG);
+               $self->_error (Errno::EBADMSG);
             }
          });
       });
@@ -1299,7 +1302,7 @@ register_read_type json => sub {
          $self->{rbuf} = $json->incr_text;
          $json->incr_text = "";
 
-         $self->_error (&Errno::EBADMSG);
+         $self->_error (Errno::EBADMSG);
 
          ()
       } else {
@@ -1346,7 +1349,7 @@ register_read_type storable => sub {
             if (my $ref = eval { Storable::thaw ($_[1]) }) {
                $cb->($_[0], $ref);
             } else {
-               $self->_error (&Errno::EBADMSG);
+               $self->_error (Errno::EBADMSG);
             }
          });
       }
@@ -1454,7 +1457,7 @@ sub _tls_error {
       &_freetls;
    } else {
       &_freetls;
-      $self->_error (&Errno::EPROTO, 1, $err);
+      $self->_error (Errno::EPROTO, 1, $err);
    }
 }
 
@@ -1673,6 +1676,11 @@ callback, so when you want to destroy the AnyEvent::Handle object from
 within such an callback. You I<MUST> call C<< ->destroy >> explicitly in
 that case.
 
+Destroying the handle object in this way has the advantage that callbacks
+will be removed as well, so if those are the only reference holders (as
+is common), then one doesn't need to do anything special to break any
+reference cycles.
+
 The handle might still linger in the background and write out remaining
 data, as specified by the C<linger> option, however.
 
@@ -1749,7 +1757,6 @@ will be in C<$_[0]{rbuf}>:
    $handle->on_eof (undef);
    $handle->on_error (sub {
       my $data = delete $_[0]{rbuf};
-      undef $handle;
    });
 
 The reason to use C<on_error> is that TCP connections, due to latencies
