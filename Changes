@@ -1,5 +1,19 @@
 Revision history for Perl extension AnyEvent.
 
+4.85 Sat Jul 18 06:16:14 CEST 2009
+        - nail the signal race problem in perl once and for all
+          (see $AnyEvent::MAX_SIGNAL_LATENCY).
+        - take advantage of Async::Interrupt if it is available.
+        - load Time::HiRes and Guard modules on demand only.
+        - add optional/recommended modules section to AnyEvent
+          documentation.
+        - reduce memory usage considerably (and reduce startup penalty)
+          by not using "strict", "warnings" and "overload" modules.
+        - work around buggy windows/openbsd perls and provide EBADMSG
+          and EPROTO ourselves when missing.
+	- improve perl 5.6 compatibility of the core event loop.
+        - made Net::SSLeay version 1.33 a soft requirement.
+
 4.83 Fri Jul 17 16:56:26 CEST 2009
 	- implement AnyEvent::Socket::getprotobyname.
 	- AnyEvent::CondVar's will now detect recursive blocking

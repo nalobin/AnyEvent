@@ -1,6 +1,6 @@
 use ExtUtils::MakeMaker;
 
-use 5.008; # AnyEvent core seems to work with 5.6
+use 5.008; # AnyEvent perl event loop seems to work with 5.6, other modules not
 
 print <<EOF;
 
@@ -30,11 +30,12 @@ WriteMakefile(
     VERSION_FROM => "lib/AnyEvent.pm",
     META_MERGE => {
         recommends => {
-           "Net::SSLeay" => 1.33,
-           "JSON"        => 2.09,
-           "JSON::XS"    => 2.2,
-           "EV"          => 3.05,
-           "Guard"       => 1.02,
+           "Net::SSLeay"      => 1.33,
+           "JSON"             => 2.09,
+           "JSON::XS"         => 2.2,
+           "EV"               => 3.05,
+           "Guard"            => 1.02,
+           "Async::Interrupt" => 0.6,
         }
     },
 );

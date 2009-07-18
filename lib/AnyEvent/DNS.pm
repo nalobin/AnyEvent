@@ -28,16 +28,13 @@ virtual circuit mode for large responses.
 
 package AnyEvent::DNS;
 
-no warnings;
-use strict;
-
 use Carp ();
 use Socket qw(AF_INET SOCK_DGRAM SOCK_STREAM);
 
-use AnyEvent ();
+use AnyEvent (); BEGIN { AnyEvent::common_sense }
 use AnyEvent::Util qw(AF_INET6);
 
-our $VERSION = 4.83;
+our $VERSION = 4.85;
 
 our @DNS_FALLBACK = (v208.67.220.220, v208.67.222.222);
 
@@ -379,6 +376,13 @@ our %class_str = reverse %class_id;
 
 sub _enc_name($) {
    pack "(C/a*)*", (split /\./, shift), ""
+}
+
+if ($[ < 5.008) {
+   # special slower 5.6 version
+   *_enc_name = sub {
+      join "", map +(pack "C/a*", $_), (split /\./, shift), ""
+   };
 }
 
 sub _enc_qd() {
@@ -847,7 +851,7 @@ sub parse_resolv_conf {
 sub _parse_resolv_conf_file {
    my ($self, $resolv_conf) = @_;
 
-   open my $fh, "<:perlio", $resolv_conf
+   open my $fh, "<", $resolv_conf
       or Carp::croak "$resolv_conf: $!";
 
    local $/;
@@ -1079,7 +1083,7 @@ sub _exec {
       
       my $sa = AnyEvent::Socket::pack_sockaddr (DOMAIN_PORT, $server);
 
-      my $fh = AF_INET == Socket::sockaddr_family ($sa)
+      my $fh = AF_INET == AnyEvent::Socket::sockaddr_family ($sa)
                ? $self->{fh4} : $self->{fh6}
          or return &$do_retry;
 

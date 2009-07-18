@@ -20,26 +20,18 @@ by default.
 
 package AnyEvent::Util;
 
-no warnings;
-use strict;
-
 use Carp ();
 use Errno ();
 use Socket ();
 
-use AnyEvent ();
+use AnyEvent (); BEGIN { AnyEvent::common_sense }
 
 use base 'Exporter';
 
 our @EXPORT = qw(fh_nonblocking guard fork_call portable_pipe portable_socketpair);
-our @EXPORT_OK = qw(AF_INET6 WSAEWOULDBLOCK WSAEINPROGRESS WSAEINVAL WSAWOULDBLOCK);
+our @EXPORT_OK = qw(AF_INET6 WSAEWOULDBLOCK WSAEINPROGRESS WSAEINVAL);
 
-our $VERSION = 4.83;
-
-BEGIN {
-   my $posix = 1 * eval { local $SIG{__DIE__}; require POSIX };
-   eval "sub POSIX() { $posix }";
-}
+our $VERSION = 4.85;
 
 BEGIN {
    my $af_inet6 = eval { local $SIG{__DIE__}; &Socket::AF_INET6 };
@@ -62,16 +54,30 @@ BEGIN {
 BEGIN {
    # broken windows perls use undocumented error codes...
    if (AnyEvent::WIN32) {
-      eval "sub WSAEINVAL()      { 10022 }";
-      eval "sub WSAEWOULDBLOCK() { 10035 }";
-      eval "sub WSAWOULDBLOCK() { 10035 }"; # TODO remove here and from @export_ok
-      eval "sub WSAEINPROGRESS() { 10036 }";
+      eval "sub WSAEINVAL      () { 10022 }";
+      eval "sub WSAEWOULDBLOCK () { 10035 }";
+      eval "sub WSAEINPROGRESS () { 10036 }";
    } else {
       # these should never match any errno value
-      eval "sub WSAEINVAL()      { -1e99 }";
-      eval "sub WSAEWOULDBLOCK() { -1e99 }";
-      eval "sub WSAWOULDBLOCK() { -1e99 }"; # TODO
-      eval "sub WSAEINPROGRESS() { -1e99 }";
+      eval "sub WSAEINVAL      () { -1e99 }";
+      eval "sub WSAEWOULDBLOCK () { -1e99 }";
+      eval "sub WSAEINPROGRESS () { -1e99 }";
+   }
+
+   # fix buggy Errno on some non-POSIX platforms
+   # such as openbsd and windows.
+   my %ERR = (
+      EBADMSG => Errno::EDOM   (),
+      EPROTO  => Errno::ESPIPE (),
+   );
+
+   while (my ($k, $v) = each %ERR) {
+      next if eval "Errno::$k ()";
+      warn "AnyEvent::Util: broken Errno module, adding Errno::$k.\n" if $AnyEvent::VERBOSE >= 8;
+
+      eval "sub Errno::$k () { $v }";
+      push @Errno::EXPORT_OK, $k;
+      push @{ $Errno::EXPORT_TAGS{POSIX} }, $k;
    }
 }
 
@@ -390,10 +396,13 @@ guard.
 
 =cut
 
-BEGIN {
-   if (eval "use Guard 0.5; 1") {
+sub guard(&) {
+   if (!$ENV{PERL_ANYEVENT_AVOID_GUARD} && eval "use Guard 0.5 (); 1") {
+      warn "AnyEvent::Util: using Guard module to implement guards.\n" if $AnyEvent::VERBOSE >= 8;
       *guard = \&Guard::guard;
    } else {
+      warn "AnyEvent::Util: using pure-perl guard implementation.\n" if $AnyEvent::VERBOSE >= 8;
+
       *AnyEvent::Util::guard::DESTROY = sub {
          local $@;
 
@@ -413,6 +422,8 @@ BEGIN {
          bless \(my $cb = shift), "AnyEvent::Util::guard"
       }
    }
+
+   goto &guard;
 }
 
 #############################################################################
