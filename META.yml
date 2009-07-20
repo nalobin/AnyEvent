@@ -11,7 +11,7 @@
    },
    "generated_by" : "ExtUtils::MakeMaker version 6.50",
    "distribution_type" : "module",
-   "version" : "4.85",
+   "version" : "4.86",
    "name" : "AnyEvent",
    "author" : [],
    "license" : "unknown",

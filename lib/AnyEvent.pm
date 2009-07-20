@@ -1,6 +1,6 @@
 =head1 NAME
 
-AnyEvent - provide framework for multiple event loops 
+AnyEvent - events independent of event loop implementation
 
 EV, Event, Glib, Tk, Perl, Event::Lib, Qt and POE are various supported
 event loops.
@@ -42,6 +42,14 @@ event loops.
 This manpage is mainly a reference manual. If you are interested
 in a tutorial or some gentle introduction, have a look at the
 L<AnyEvent::Intro> manpage.
+
+=head1 SUPPORT
+
+There is a mailinglist for discussing all things AnyEvent, and an IRC
+channel, too.
+
+See the AnyEvent project page at the B<Schmorpforge Ta-Sa Software
+Respository>, at L<http://anyevent.schmorp.de>, for more info.
 
 =head1 WHY YOU SHOULD USE THIS MODULE (OR NOT)
 
@@ -370,8 +378,14 @@ This watcher might use C<%SIG> (depending on the event loop used),
 so programs overwriting those signals directly will likely not work
 correctly.
 
-Also note that many event loops (e.g. Glib, Tk, Qt, IO::Async) do not
-support attaching callbacks to signals, which is a pity, as you cannot do
+Example: exit on SIGINT
+
+   my $w = AnyEvent->signal (signal => "INT", cb => sub { exit 1 });
+
+=head3 Signal Races, Delays and Workarounds
+
+Many event loops (e.g. Glib, Tk, Qt, IO::Async) do not support attaching
+callbacks to signals in a generic way, which is a pity, as you cannot do
 race-free signal handling in perl. AnyEvent will try to do it's best, but
 in some cases, signals will be delayed. The maximum time a signal might
 be delayed is specified in C<$AnyEvent::MAX_SIGNAL_LATENCY> (default: 10
@@ -379,11 +393,10 @@ seconds). This variable can be changed only before the first signal
 watcher is created, and should be left alone otherwise. Higher values
 will cause fewer spurious wake-ups, which is better for power and CPU
 saving. All these problems can be avoided by installing the optional
-L<Async::Interrupt> module.
-
-Example: exit on SIGINT
-
-   my $w = AnyEvent->signal (signal => "INT", cb => sub { exit 1 });
+L<Async::Interrupt> module. This will not work with inherently broken
+event loops such as L<Event> or L<Event::Lib> (and not with L<POE>
+currently, as POE does it's own workaround with one-second latency). With
+those, you just have to suffer the delays.
 
 =head2 CHILD PROCESS WATCHERS
 
@@ -506,7 +519,8 @@ optionally wait for them. They can also be called merge points - points
 in time where multiple outstanding events have been processed. And yet
 another way to call them is transactions - each condition variable can be
 used to represent a transaction, which finishes at some point and delivers
-a result.
+a result. And yet some people know them as "futures" - a promise to
+compute/deliver something that you can wait for.
 
 Condition variables are very useful to signal that something has finished,
 for example, if you write a module that does asynchronous http requests,
@@ -1055,7 +1069,7 @@ BEGIN { AnyEvent::common_sense }
 
 use Carp ();
 
-our $VERSION = 4.85;
+our $VERSION = 4.86;
 our $MODEL;
 
 our $AUTOLOAD;
@@ -1272,6 +1286,25 @@ sub _signal_exec {
    }
 }
 
+# install a dumym wakeupw atcher to reduce signal catching latency
+sub _sig_add() {
+   unless ($SIG_COUNT++) {
+      # try to align timer on a full-second boundary, if possible
+      my $NOW = AnyEvent->now;
+
+      $SIG_TW = AnyEvent->timer (
+         after    => $MAX_SIGNAL_LATENCY - ($NOW - int $NOW),
+         interval => $MAX_SIGNAL_LATENCY,
+         cb       => sub { }, # just for the PERL_ASYNC_CHECK
+      );
+   }
+}
+
+sub _sig_del {
+   undef $SIG_TW
+      unless --$SIG_COUNT;
+}
+
 sub _signal {
    my (undef, %arg) = @_;
 
@@ -1305,12 +1338,7 @@ sub _signal {
 
       # can't do signal processing without introducing races in pure perl,
       # so limit the signal latency.
-      ++$SIG_COUNT;
-      $SIG_TW ||= AnyEvent->timer (
-         after    => $MAX_SIGNAL_LATENCY,
-         interval => $MAX_SIGNAL_LATENCY,
-         cb       => sub { }, # just for the PERL_ASYNC_CHECK
-      );
+      _sig_add;
    }
 
    bless [$signal, $arg{cb}], "AnyEvent::Base::signal"
@@ -1359,8 +1387,7 @@ sub signal {
 sub AnyEvent::Base::signal::DESTROY {
    my ($signal, $cb) = @{$_[0]};
 
-   undef $SIG_TW
-      unless --$SIG_COUNT;
+   _sig_del;
 
    delete $SIG_CB{$signal}{$cb};
 
@@ -2259,7 +2286,7 @@ This slightly arcane module is used to implement fast signal handling: To
 my knowledge, there is no way to do completely race-free and quick
 signal handling in pure perl. To ensure that signals still get
 delivered, AnyEvent will start an interval timer to wake up perl (and
-catch the signals) with soemd elay (default is 10 seconds, look for
+catch the signals) with some delay (default is 10 seconds, look for
 C<$AnyEvent::MAX_SIGNAL_LATENCY>).
 
 If this module is available, then it will be used to implement signal
@@ -2269,6 +2296,11 @@ battery life on laptops).
 
 This affects not just the pure-perl event loop, but also other event loops
 that have no signal handling on their own (e.g. Glib, Tk, Qt).
+
+Some event loops (POE, Event, Event::Lib) offer signal watchers natively,
+and either employ their own workarounds (POE) or use AnyEvent's workaround
+(using C<$AnyEvent::MAX_SIGNAL_LATENCY>). Installing L<Async::Interrupt>
+does nothing for those backends.
 
 =item L<EV>
 
@@ -2292,7 +2324,7 @@ purely used for performance.
 
 This module is required when you want to read or write JSON data via
 L<AnyEvent::Handle>. It is also written in pure-perl, but can take
-advantage of the ulta-high-speed L<JSON::XS> module when it is installed.
+advantage of the ultra-high-speed L<JSON::XS> module when it is installed.
 
 In fact, L<AnyEvent::Handle> will use L<JSON::XS> by default if it is
 installed.
