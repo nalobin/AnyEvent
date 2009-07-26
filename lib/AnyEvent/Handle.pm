@@ -13,7 +13,7 @@ AnyEvent::Handle - non-blocking I/O on file handles via AnyEvent
 
 =cut
 
-our $VERSION = 4.86;
+our $VERSION = 4.87;
 
 =head1 SYNOPSIS
 
@@ -46,8 +46,7 @@ our $VERSION = 4.86;
 =head1 DESCRIPTION
 
 This module is a helper module to make it easier to do event-based I/O on
-filehandles. For utility functions for doing non-blocking connects and accepts
-on sockets see L<AnyEvent::Util>.
+filehandles.
 
 The L<AnyEvent::Intro> tutorial contains some well-documented
 AnyEvent::Handle examples.
@@ -55,6 +54,9 @@ AnyEvent::Handle examples.
 In the following, when the documentation refers to of "bytes" then this
 means characters. As sysread and syswrite are used for all I/O, their
 treatment of characters applies to this module as well.
+
+At the very minimum, you should specify C<fh> or C<connect>, and the
+C<on_error> callback.
 
 All callbacks will be invoked with the handle object as their first
 argument.
@@ -69,29 +71,67 @@ The constructor supports these arguments (all as C<< key => value >> pairs).
 
 =over 4
 
-=item fh => $filehandle [MANDATORY]
+=item fh => $filehandle     [C<fh> or C<connect> MANDATORY]
 
 The filehandle this L<AnyEvent::Handle> object will operate on.
-
 NOTE: The filehandle will be set to non-blocking mode (using
 C<AnyEvent::Util::fh_nonblocking>) by the constructor and needs to stay in
 that mode.
 
-=item on_eof => $cb->($handle)
+=item connect => [$host, $service]      [C<fh> or C<connect> MANDATORY]
 
-Set the callback to be called when an end-of-file condition is detected,
-i.e. in the case of a socket, when the other side has closed the
-connection cleanly, and there are no outstanding read requests in the
-queue (if there are read requests, then an EOF counts as an unexpected
-connection close and will be flagged as an error).
+Try to connect to the specified host and service (port), using
+C<AnyEvent::Socket::tcp_connect>. The C<$host> additionally becomes the
+default C<peername>.
 
-For sockets, this just means that the other side has stopped sending data,
-you can still try to write data, and, in fact, one can return from the EOF
-callback and continue writing data, as only the read part has been shut
-down.
+You have to specify either this parameter, or C<fh>, above.
 
-If an EOF condition has been detected but no C<on_eof> callback has been
-set, then a fatal error will be raised with C<$!> set to <0>.
+It is possible to push requests on the read and write queues, and modify
+properties of the stream, even while AnyEvent::Handle is connecting.
+
+When this parameter is specified, then the C<on_prepare>,
+C<on_connect_error> and C<on_connect> callbacks will be called under the
+appropriate circumstances:
+
+=over 4
+
+=item on_prepare => $cb->($handle)
+
+This (rarely used) callback is called before a new connection is
+attempted, but after the file handle has been created. It could be used to
+prepare the file handle with parameters required for the actual connect
+(as opposed to settings that can be changed when the connection is already
+established).
+
+The return value of this callback should be the connect timeout value in
+seconds (or C<0>, or C<undef>, or the empty list, to indicate the default
+timeout is to be used).
+
+=item on_connect => $cb->($handle, $host, $port, $retry->())
+
+This callback is called when a connection has been successfully established.
+
+The actual numeric host and port (the socket peername) are passed as
+parameters, together with a retry callback.
+
+When, for some reason, the handle is not acceptable, then calling
+C<$retry> will continue with the next conenction target (in case of
+multi-homed hosts or SRV records there can be multiple connection
+endpoints). When it is called then the read and write queues, eof status,
+tls status and similar properties of the handle are being reset.
+
+In most cases, ignoring the C<$retry> parameter is the way to go.
+
+=item on_connect_error => $cb->($handle, $message)
+
+This callback is called when the conenction could not be
+established. C<$!> will contain the relevant error code, and C<$message> a
+message describing it (usually the same as C<"$!">).
+
+If this callback isn't specified, then C<on_error> will be called with a
+fatal error instead.
+
+=back
 
 =item on_error => $cb->($handle, $fatal, $message)
 
@@ -103,7 +143,9 @@ Some errors are fatal (which is indicated by C<$fatal> being true). On
 fatal errors the handle object will be destroyed (by a call to C<< ->
 destroy >>) after invoking the error callback (which means you are free to
 examine the handle object). Examples of fatal errors are an EOF condition
-with active (but unsatisifable) read watchers (C<EPIPE>) or I/O errors.
+with active (but unsatisifable) read watchers (C<EPIPE>) or I/O errors. In
+cases where the other side can close the connection at their will it is
+often easiest to not report C<EPIPE> errors in this callback.
 
 AnyEvent::Handle tries to find an appropriate error code for you to check
 against, but in some cases (TLS errors), this does not work well. It is
@@ -144,6 +186,22 @@ Note that, unlike requests in the read queue, an C<on_read> callback
 doesn't mean you I<require> some data: if there is an EOF and there
 are outstanding read requests then an error will be flagged. With an
 C<on_read> callback, the C<on_eof> callback will be invoked.
+
+=item on_eof => $cb->($handle)
+
+Set the callback to be called when an end-of-file condition is detected,
+i.e. in the case of a socket, when the other side has closed the
+connection cleanly, and there are no outstanding read requests in the
+queue (if there are read requests, then an EOF counts as an unexpected
+connection close and will be flagged as an error).
+
+For sockets, this just means that the other side has stopped sending data,
+you can still try to write data, and, in fact, one can return from the EOF
+callback and continue writing data, as only the read part has been shut
+down.
+
+If an EOF condition has been detected but no C<on_eof> callback has been
+set, then a fatal error will be raised with C<$!> set to <0>.
 
 =item on_drain => $cb->($handle)
 
@@ -352,7 +410,69 @@ sub new {
    my $class = shift;
    my $self = bless { @_ }, $class;
 
-   $self->{fh} or Carp::croak "mandatory argument fh is missing";
+   if ($self->{fh}) {
+      $self->_start;
+      return unless $self->{fh}; # could be gone by now
+
+   } elsif ($self->{connect}) {
+      require AnyEvent::Socket;
+
+      $self->{peername} = $self->{connect}[0]
+         unless exists $self->{peername};
+
+      $self->{_skip_drain_rbuf} = 1;
+
+      {
+         Scalar::Util::weaken (my $self = $self);
+
+         $self->{_connect} =
+            AnyEvent::Socket::tcp_connect (
+               $self->{connect}[0],
+               $self->{connect}[1],
+               sub {
+                  my ($fh, $host, $port, $retry) = @_;
+
+                  if ($fh) {
+                     $self->{fh} = $fh;
+
+                     delete $self->{_skip_drain_rbuf};
+                     $self->_start;
+
+                     $self->{on_connect}
+                        and $self->{on_connect}($self, $host, $port, sub {
+                               delete @$self{qw(fh _tw _ww _rw _eof _queue rbuf _wbuf tls _tls_rbuf _tls_wbuf)};
+                               $self->{_skip_drain_rbuf} = 1;
+                               &$retry;
+                            });
+
+                  } else {
+                     if ($self->{on_connect_error}) {
+                        $self->{on_connect_error}($self, "$!");
+                        $self->destroy;
+                     } else {
+                        $self->_error ($!, 1);
+                     }
+                  }
+               },
+               sub {
+                  local $self->{fh} = $_[0];
+
+                  $self->{on_prepare}
+                     ?  $self->{on_prepare}->($self)
+                     : ()
+               }
+            );
+      }
+
+   } else {
+      Carp::croak "AnyEvent::Handle: either an existing fh or the connect parameter must be specified";
+   }
+
+   $self
+}
+
+sub _start {
+   my ($self) = @_;
 
    AnyEvent::Util::fh_nonblocking $self->{fh}, 1;
 
@@ -367,9 +487,9 @@ sub new {
    $self->on_drain (delete $self->{on_drain}) if $self->{on_drain};
 
    $self->start_read
-      if $self->{on_read};
+      if $self->{on_read} || @{ $self->{_queue} };
 
-   $self->{fh} && $self
+   $self->_drain_wbuf;
 }
 
 #sub _shutdown {
@@ -459,7 +579,8 @@ sub no_delay {
 
    eval {
       local $SIG{__DIE__};
-      setsockopt $_[0]{fh}, &Socket::IPPROTO_TCP, &Socket::TCP_NODELAY, int $_[1];
+      setsockopt $_[0]{fh}, &Socket::IPPROTO_TCP, &Socket::TCP_NODELAY, int $_[1]
+         if $_[0]{fh};
    };
 }
 
@@ -503,7 +624,7 @@ sub timeout {
 sub _timeout {
    my ($self) = @_;
 
-   if ($self->{timeout}) {
+   if ($self->{timeout} && $self->{fh}) {
       my $NOW = AnyEvent->now;
 
       # when would the timeout trigger?
@@ -631,11 +752,10 @@ sub push_write {
 
    if ($self->{tls}) {
       $self->{_tls_wbuf} .= $_[0];
-
-      &_dotls ($self);
+      &_dotls ($self)    if $self->{fh};
    } else {
-      $self->{wbuf} .= $_[0];
-      $self->_drain_wbuf;
+      $self->{wbuf}      .= $_[0];
+      $self->_drain_wbuf if $self->{fh};
    }
 }
 
@@ -862,7 +982,9 @@ C<unshift> another line-read. This line-read will be queued I<before> the
 sub _drain_rbuf {
    my ($self) = @_;
 
-   local $self->{_in_drain} = 1;
+   # avoid recursion
+   return if exists $self->{_skip_drain_rbuf};
+   local $self->{_skip_drain_rbuf} = 1;
 
    if (
       defined $self->{rbuf_max}
@@ -939,7 +1061,7 @@ sub on_read {
    my ($self, $cb) = @_;
 
    $self->{on_read} = $cb;
-   $self->_drain_rbuf if $cb && !$self->{_in_drain};
+   $self->_drain_rbuf if $cb;
 }
 
 =item $handle->rbuf
@@ -1001,7 +1123,7 @@ sub push_read {
    }
 
    push @{ $self->{_queue} }, $cb;
-   $self->_drain_rbuf unless $self->{_in_drain};
+   $self->_drain_rbuf;
 }
 
 sub unshift_read {
@@ -1017,7 +1139,7 @@ sub unshift_read {
 
 
    unshift @{ $self->{_queue} }, $cb;
-   $self->_drain_rbuf unless $self->{_in_drain};
+   $self->_drain_rbuf;
 }
 
 =item $handle->push_read (type => @args, $cb)
@@ -1420,13 +1542,13 @@ sub start_read {
 
                &_dotls ($self);
             } else {
-               $self->_drain_rbuf unless $self->{_in_drain};
+               $self->_drain_rbuf;
             }
 
          } elsif (defined $len) {
             delete $self->{_rw};
             $self->{_eof} = 1;
-            $self->_drain_rbuf unless $self->{_in_drain};
+            $self->_drain_rbuf;
 
          } elsif ($! != EAGAIN && $! != EINTR && $! != WSAEWOULDBLOCK) {
             return $self->_error ($!, 1);
@@ -1496,7 +1618,7 @@ sub _dotls {
       }
 
       $self->{_tls_rbuf} .= $tmp;
-      $self->_drain_rbuf unless $self->{_in_drain};
+      $self->_drain_rbuf;
       $self->{tls} or return; # tls session might have gone away in callback
    }
 
@@ -1521,6 +1643,10 @@ Instead of starting TLS negotiation immediately when the AnyEvent::Handle
 object is created, you can also do that at a later time by calling
 C<starttls>.
 
+Starting TLS is currently an asynchronous operation - when you push some
+write data and then call C<< ->starttls >> then TLS negotiation will start
+immediately, after which the queued write data is then sent.
+
 The first argument is the same as the C<tls> constructor argument (either
 C<"connect">, C<"accept"> or an existing Net::SSLeay object).
 
@@ -1534,30 +1660,37 @@ context in C<< $handle->{tls_ctx} >> after this call and can be used or
 changed to your liking. Note that the handshake might have already started
 when this function returns.
 
-If it an error to start a TLS handshake more than once per
-AnyEvent::Handle object (this is due to bugs in OpenSSL).
+Due to bugs in OpenSSL, it might or might not be possible to do multiple
+handshakes on the same stream. Best do not attempt to use the stream after
+stopping TLS.
 
 =cut
 
 our %TLS_CACHE; #TODO not yet documented, should we?
 
 sub starttls {
-   my ($self, $ssl, $ctx) = @_;
+   my ($self, $tls, $ctx) = @_;
+
+   Carp::croak "It is an error to call starttls on an AnyEvent::Handle object while TLS is already active, caught"
+      if $self->{tls};
+
+   $self->{tls}     = $tls;
+   $self->{tls_ctx} = $ctx if @_ > 2;
+
+   return unless $self->{fh};
 
    require Net::SSLeay;
-
-   Carp::croak "it is an error to call starttls more than once on an AnyEvent::Handle object"
-      if $self->{tls};
 
    $ERROR_SYSCALL   = Net::SSLeay::ERROR_SYSCALL     ();
    $ERROR_WANT_READ = Net::SSLeay::ERROR_WANT_READ   ();
 
-   $ctx ||= $self->{tls_ctx};
+   $tls = $self->{tls};
+   $ctx = $self->{tls_ctx};
+
+   local $Carp::CarpLevel = 1; # skip ourselves when creating a new context or session
 
    if ("HASH" eq ref $ctx) {
       require AnyEvent::TLS;
-
-      local $Carp::CarpLevel = 1; # skip ourselves when creating a new context
 
       if ($ctx->{cache}) {
          my $key = $ctx+0;
@@ -1568,7 +1701,7 @@ sub starttls {
    }
    
    $self->{tls_ctx} = $ctx || TLS_CTX ();
-   $self->{tls}     = $ssl = $self->{tls_ctx}->_get_session ($ssl, $self, $self->{peername});
+   $self->{tls}     = $tls = $self->{tls_ctx}->_get_session ($tls, $self, $self->{peername});
 
    # basically, this is deep magic (because SSL_read should have the same issues)
    # but the openssl maintainers basically said: "trust us, it just works".
@@ -1585,12 +1718,12 @@ sub starttls {
 #   Net::SSLeay::CTX_set_mode ($ssl,
 #      (eval { local $SIG{__DIE__}; Net::SSLeay::MODE_ENABLE_PARTIAL_WRITE () } || 1)
 #      | (eval { local $SIG{__DIE__}; Net::SSLeay::MODE_ACCEPT_MOVING_WRITE_BUFFER () } || 2));
-   Net::SSLeay::CTX_set_mode ($ssl, 1|2);
+   Net::SSLeay::CTX_set_mode ($tls, 1|2);
 
    $self->{_rbio} = Net::SSLeay::BIO_new (Net::SSLeay::BIO_s_mem ());
    $self->{_wbio} = Net::SSLeay::BIO_new (Net::SSLeay::BIO_s_mem ());
 
-   Net::SSLeay::set_bio ($ssl, $self->{_rbio}, $self->{_wbio});
+   Net::SSLeay::set_bio ($tls, $self->{_rbio}, $self->{_wbio});
 
    $self->{_on_starttls} = sub { $_[0]{on_starttls}(@_) }
       if $self->{on_starttls};
@@ -1603,8 +1736,8 @@ sub starttls {
 
 Shuts down the SSL connection - this makes a proper EOF handshake by
 sending a close notify to the other side, but since OpenSSL doesn't
-support non-blocking shut downs, it is not possible to re-use the stream
-afterwards.
+support non-blocking shut downs, it is not guarenteed that you can re-use
+the stream afterwards.
 
 =cut
 
@@ -1627,7 +1760,8 @@ sub _freetls {
 
    return unless $self->{tls};
 
-   $self->{tls_ctx}->_put_session (delete $self->{tls});
+   $self->{tls_ctx}->_put_session (delete $self->{tls})
+      if ref $self->{tls};
    
    delete @$self{qw(_rbio _wbio _tls_wbuf _on_starttls)};
 }
@@ -1639,7 +1773,7 @@ sub DESTROY {
 
    my $linger = exists $self->{linger} ? $self->{linger} : 3600;
 
-   if ($linger && length $self->{wbuf}) {
+   if ($linger && length $self->{wbuf} && $self->{fh}) {
       my $fh   = delete $self->{fh};
       my $wbuf = delete $self->{wbuf};
 

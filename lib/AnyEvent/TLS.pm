@@ -14,7 +14,7 @@ AnyEvent::TLS - SSLv2/SSLv3/TLSv1 contexts for use in AnyEvent::Handle
 
 =cut
 
-our $VERSION = 4.86;
+our $VERSION = 4.87;
 
 =head1 SYNOPSIS
 
@@ -806,6 +806,8 @@ sub _get_session($$;$$) {
 
       Net::SSLeay::set_options ($session, eval { Net::SSLeay::OP_NO_TICKET () })
          unless $self->{session_ticket};
+   } else {
+      croak "'$mode': unsupported TLS mode (must be either 'connect' or 'accept')"
    }
 
 #   # associate data
