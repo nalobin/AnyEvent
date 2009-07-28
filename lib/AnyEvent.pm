@@ -2,8 +2,8 @@
 
 AnyEvent - the DBI of event loop programming
 
-EV, Event, Glib, Tk, Perl, Event::Lib, Irssi, IO::Async, Qt and POE are
-various supported event loops/environments.
+EV, Event, Glib, Tk, Perl, Event::Lib, Irssi, rxvt-unicode, IO::Async, Qt
+and POE are various supported event loops/environments.
 
 =head1 SYNOPSIS
 
@@ -1088,7 +1088,7 @@ BEGIN { AnyEvent::common_sense }
 
 use Carp ();
 
-our $VERSION = 4.87;
+our $VERSION = 4.88;
 our $MODEL;
 
 our $AUTOLOAD;

@@ -13,7 +13,7 @@ AnyEvent::Handle - non-blocking I/O on file handles via AnyEvent
 
 =cut
 
-our $VERSION = 4.87;
+our $VERSION = 4.88;
 
 =head1 SYNOPSIS
 
@@ -996,16 +996,17 @@ sub _drain_rbuf {
    while () {
       # we need to use a separate tls read buffer, as we must not receive data while
       # we are draining the buffer, and this can only happen with TLS.
-      $self->{rbuf} .= delete $self->{_tls_rbuf} if exists $self->{_tls_rbuf};
+      $self->{rbuf} .= delete $self->{_tls_rbuf}
+         if exists $self->{_tls_rbuf};
 
       my $len = length $self->{rbuf};
 
       if (my $cb = shift @{ $self->{_queue} }) {
          unless ($cb->($self)) {
-            if ($self->{_eof}) {
-               # no progress can be made (not enough data and no data forthcoming)
-               $self->_error (Errno::EPIPE, 1), return;
-            }
+            # no progress can be made
+            # (not enough data and no data forthcoming)
+            $self->_error (Errno::EPIPE, 1), return
+               if $self->{_eof};
 
             unshift @{ $self->{_queue} }, $cb;
             last;
@@ -1035,11 +1036,11 @@ sub _drain_rbuf {
    }
 
    if ($self->{_eof}) {
-      if ($self->{on_eof}) {
-         $self->{on_eof}($self)
-      } else {
-         $self->_error (0, 1, "Unexpected end-of-file");
-      }
+      $self->{on_eof}
+         ? $self->{on_eof}($self)
+         : $self->_error (0, 1, "Unexpected end-of-file");
+
+      return;
    }
 
    # may need to restart read watcher
@@ -1798,7 +1799,9 @@ sub DESTROY {
 
 Shuts down the handle object as much as possible - this call ensures that
 no further callbacks will be invoked and as many resources as possible
-will be freed. You must not call any methods on the object afterwards.
+will be freed. Any method you will call on the handle object after
+destroying it in this way will be silently ignored (and it will return the
+empty list).
 
 Normally, you can just "forget" any references to an AnyEvent::Handle
 object and it will simply shut down. This works in fatal error and EOF
@@ -1822,6 +1825,11 @@ sub destroy {
 
    $self->DESTROY;
    %$self = ();
+   bless $self, "AnyEvent::Handle::destroyed";
+}
+
+sub AnyEvent::Handle::destroyed::AUTOLOAD {
+   #nop
 }
 
 =item AnyEvent::Handle::TLS_CTX
