@@ -4,9 +4,11 @@ Changes
 README
 Makefile.PL
 
+lib/AE.pm
 lib/AnyEvent.pm
 lib/AnyEvent/Intro.pod
 lib/AnyEvent/Strict.pm
+lib/AnyEvent/Debug.pm
 lib/AnyEvent/DNS.pm
 lib/AnyEvent/Util.pm
 lib/AnyEvent/TLS.pm

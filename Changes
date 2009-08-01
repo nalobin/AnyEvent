@@ -1,8 +1,31 @@
 Revision history for Perl extension AnyEvent.
 
+4.9  Sat Aug  1 11:07:01 CEST 2009
+	- Glib silently fails when registering a timeout with
+          a negative value, so avoid that.
+        - call condvar callback immediately  when it is set
+          after the condition is already signalled.
+        - check rbuf_max condition only after trying to consume
+          data.
+	- normalise signal numbers to names when using the ae's
+          signal handling, but do not document this (yet).
+        - pure perl signal emulation did not properly set nonblocking
+          mode on the signal pipe on win32 (this is unlikely to have caused
+          any issues).
+        - new module: AnyEvent::Debug.
+        - AnyEvent::Strict now checks that a signal was specified
+          by name (not name or number).
+        - reduce memory footprint in typical cases by ~50kb by
+          only compiling signal code when necessary.
+        - add AnyEvent::Handle->rbuf_max.
+        - grab the AE namespace for future new API, implement stubs for
+          said future/alternative API.
+        - new function: AnyEvent::Socket::format_hostport.
+
 4.881 Tue Jul 28 12:51:53 CEST 2009
 	- work around a bug in local in pre-5.10 perls, causing
-          AnyEvent::Handle to recurse when it should not.
+          AnyEvent::Handle to recurse when it should not
+          (analyzed by elmex).
 
 4.88 Tue Jul 28 04:04:37 CEST 2009
 	- re-bless the handle into a dummy package after calling

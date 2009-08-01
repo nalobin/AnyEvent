@@ -31,7 +31,7 @@ use base 'Exporter';
 our @EXPORT = qw(fh_nonblocking guard fork_call portable_pipe portable_socketpair);
 our @EXPORT_OK = qw(AF_INET6 WSAEWOULDBLOCK WSAEINPROGRESS WSAEINVAL);
 
-our $VERSION = 4.881;
+our $VERSION = 4.9;
 
 BEGIN {
    my $af_inet6 = eval { local $SIG{__DIE__}; &Socket::AF_INET6 };
@@ -424,23 +424,6 @@ sub guard(&) {
    }
 
    goto &guard;
-}
-
-#############################################################################
-
-our %SIGNAME2NUM;
-
-sub sig2num($) {
-   return shift if $_[0] > 0;
-
-   unless (scalar keys %SIGNAME2NUM) {
-      require Config;
-
-      @SIGNAME2NUM{ split ' ', $Config::Config{sig_name} }
-                  = split ' ', $Config::Config{sig_num};
-   }
-
-   $SIGNAME2NUM{+shift}
 }
 
 1;

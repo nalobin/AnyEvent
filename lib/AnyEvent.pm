@@ -183,6 +183,12 @@ declared.
 
 =head2 I/O WATCHERS
 
+   $w = AnyEvent->io (
+      fh   => <filehandle_or_fileno>,
+      poll => <"r" or "w">,
+      cb   => <callback>,
+   );
+
 You can create an I/O watcher by calling the C<< AnyEvent->io >> method
 with the following mandatory key-value pairs as arguments:
 
@@ -220,6 +226,14 @@ watcher.
    });
 
 =head2 TIME WATCHERS
+
+   $w = AnyEvent->timer (after => <seconds>, cb => <callback>);
+
+   $w = AnyEvent->timer (
+      after    => <fractional_seconds>,
+      interval => <fractional_seconds>,
+      cb       => <callback>,
+   );
 
 You can create a time watcher by calling the C<< AnyEvent->timer >>
 method with the following mandatory arguments:
@@ -357,6 +371,8 @@ Note that updating the time I<might> cause some events to be handled.
 
 =head2 SIGNAL WATCHERS
 
+   $w = AnyEvent->signal (signal => <uppercase_signal_name>, cb => <callback>);
+
 You can watch for signals using a signal watcher, C<signal> is the signal
 I<name> in uppercase and without any C<SIG> prefix, C<cb> is the Perl
 callback to be invoked whenever a signal occurs.
@@ -385,20 +401,26 @@ Example: exit on SIGINT
 =head3 Signal Races, Delays and Workarounds
 
 Many event loops (e.g. Glib, Tk, Qt, IO::Async) do not support attaching
-callbacks to signals in a generic way, which is a pity, as you cannot do
-race-free signal handling in perl. AnyEvent will try to do it's best, but
-in some cases, signals will be delayed. The maximum time a signal might
-be delayed is specified in C<$AnyEvent::MAX_SIGNAL_LATENCY> (default: 10
-seconds). This variable can be changed only before the first signal
-watcher is created, and should be left alone otherwise. Higher values
+callbacks to signals in a generic way, which is a pity, as you cannot
+do race-free signal handling in perl, requiring C libraries for
+this. AnyEvent will try to do it's best, which means in some cases,
+signals will be delayed. The maximum time a signal might be delayed is
+specified in C<$AnyEvent::MAX_SIGNAL_LATENCY> (default: 10 seconds). This
+variable can be changed only before the first signal watcher is created,
+and should be left alone otherwise. This variable determines how often
+AnyEvent polls for signals (in case a wake-up was missed). Higher values
 will cause fewer spurious wake-ups, which is better for power and CPU
-saving. All these problems can be avoided by installing the optional
-L<Async::Interrupt> module. This will not work with inherently broken
-event loops such as L<Event> or L<Event::Lib> (and not with L<POE>
-currently, as POE does it's own workaround with one-second latency). With
-those, you just have to suffer the delays.
+saving.
+
+All these problems can be avoided by installing the optional
+L<Async::Interrupt> module, which works with most event loops. It will not
+work with inherently broken event loops such as L<Event> or L<Event::Lib>
+(and not with L<POE> currently, as POE does it's own workaround with
+one-second latency). For those, you just have to suffer the delays.
 
 =head2 CHILD PROCESS WATCHERS
+
+   $w = AnyEvent->child (pid => <process id>, cb => <callback>);
 
 You can also watch on a child process exit and catch its exit status.
 
@@ -457,6 +479,8 @@ Example: fork a process and wait for it
 
 =head2 IDLE WATCHERS
 
+   $w = AnyEvent->idle (cb => <callback>);
+
 Sometimes there is a need to do something, but it is not so important
 to do it instantly, but only when there is nothing better to do. This
 "nothing better to do" is usually defined to be "no other events need
@@ -491,6 +515,11 @@ program is otherwise idle:
    });
 
 =head2 CONDITION VARIABLES
+
+   $cv = AnyEvent->condvar;
+
+   $cv->send (<list>);
+   my @res = $cv->recv;
 
 If you are familiar with some event loops you will know that all of them
 require you to run some blocking "loop", "run" or similar function that
@@ -763,10 +792,10 @@ C<croak> have been called.
 This is a mutator function that returns the callback set and optionally
 replaces it before doing so.
 
-The callback will be called when the condition becomes "true", i.e. when
-C<send> or C<croak> are called, with the only argument being the condition
-variable itself. Calling C<recv> inside the callback or at any later time
-is guaranteed not to block.
+The callback will be called when the condition becomes (or already was)
+"true", i.e. when C<send> or C<croak> are called (or were called), with
+the only argument being the condition variable itself. Calling C<recv>
+inside the callback or at any later time is guaranteed not to block.
 
 =back
 
@@ -1088,7 +1117,7 @@ BEGIN { AnyEvent::common_sense }
 
 use Carp ();
 
-our $VERSION = 4.881;
+our $VERSION = 4.9;
 our $MODEL;
 
 our $AUTOLOAD;
@@ -1291,6 +1320,15 @@ sub condvar {
 # default implementation for ->signal
 
 our $HAVE_ASYNC_INTERRUPT;
+
+sub _have_async_interrupt() {
+   $HAVE_ASYNC_INTERRUPT = 1*(!$ENV{PERL_ANYEVENT_AVOID_ASYNC_INTERRUPT}
+                              && eval "use Async::Interrupt 1.0 (); 1")
+      unless defined $HAVE_ASYNC_INTERRUPT;
+
+   $HAVE_ASYNC_INTERRUPT
+}
+
 our ($SIGPIPE_R, $SIGPIPE_W, %SIG_CB, %SIG_EV, $SIG_IO);
 our (%SIG_ASY, %SIG_ASY_W);
 our ($SIG_COUNT, $SIG_TW);
@@ -1308,7 +1346,7 @@ sub _signal_exec {
    }
 }
 
-# install a dumym wakeupw atcher to reduce signal catching latency
+# install a dummy wakeup watcher to reduce signal catching latency
 sub _sig_add() {
    unless ($SIG_COUNT++) {
       # try to align timer on a full-second boundary, if possible
@@ -1327,99 +1365,131 @@ sub _sig_del {
       unless --$SIG_COUNT;
 }
 
-sub _signal {
-   my (undef, %arg) = @_;
+our $_sig_name_init; $_sig_name_init = sub {
+   eval q{ # poor man's autoloading
+      undef $_sig_name_init;
 
-   my $signal = uc $arg{signal}
-      or Carp::croak "required option 'signal' is missing";
+      if (_have_async_interrupt) {
+         *sig2num  = \&Async::Interrupt::sig2num;
+         *sig2name = \&Async::Interrupt::sig2name;
+      } else {
+         require Config;
 
-   $SIG_CB{$signal}{$arg{cb}} = $arg{cb};
+         my %signame2num;
+         @signame2num{ split ' ', $Config::Config{sig_name} }
+                        = split ' ', $Config::Config{sig_num};
 
-   if ($HAVE_ASYNC_INTERRUPT) {
-      # async::interrupt
+         my @signum2name;
+         @signum2name[values %signame2num] = keys %signame2num;
 
-      $SIG_ASY{$signal} ||= do {
-         my $asy = new Async::Interrupt
-            cb     => sub { undef $SIG_EV{$signal} },
-            signal => $signal,
-            pipe   => [$SIGPIPE_R->filenos],
-         ;
-         $asy->pipe_autodrain (0);
+         *sig2num = sub($) {
+            $_[0] > 0 ? shift : $signame2num{+shift}
+         };
+         *sig2name = sub ($) {
+            $_[0] > 0 ? $signum2name[+shift] : shift
+         };
+      }
+   };
+   die if $@;
+};
 
-         $asy
-      };
-
-   } else {
-      # pure perl
-
-      $SIG{$signal} ||= sub {
-         local $!;
-         syswrite $SIGPIPE_W, "\x00", 1 unless %SIG_EV;
-         undef $SIG_EV{$signal};
-      };
-
-      # can't do signal processing without introducing races in pure perl,
-      # so limit the signal latency.
-      _sig_add;
-   }
-
-   bless [$signal, $arg{cb}], "AnyEvent::Base::signal"
-}
+sub sig2num ($) { &$_sig_name_init; &sig2num  }
+sub sig2name($) { &$_sig_name_init; &sig2name }
 
 sub signal {
-   # probe for availability of Async::Interrupt
-   if (!$ENV{PERL_ANYEVENT_AVOID_ASYNC_INTERRUPT} && eval "use Async::Interrupt 0.6 (); 1") {
-      warn "AnyEvent: using Async::Interrupt for race-free signal handling.\n" if $VERBOSE >= 8;
+   eval q{ # poor man's autoloading {}
+      # probe for availability of Async::Interrupt 
+      if (_have_async_interrupt) {
+         warn "AnyEvent: using Async::Interrupt for race-free signal handling.\n" if $VERBOSE >= 8;
 
-      $HAVE_ASYNC_INTERRUPT = 1;
-      $SIGPIPE_R = new Async::Interrupt::EventPipe;
-      $SIG_IO = AnyEvent->io (fh => $SIGPIPE_R->fileno, poll => "r", cb => \&_signal_exec);
+         $SIGPIPE_R = new Async::Interrupt::EventPipe;
+         $SIG_IO = AnyEvent->io (fh => $SIGPIPE_R->fileno, poll => "r", cb => \&_signal_exec);
 
-   } else {
-      warn "AnyEvent: using emulated perl signal handling with latency timer.\n" if $VERBOSE >= 8;
-
-      require Fcntl;
-
-      if (AnyEvent::WIN32) {
-         require AnyEvent::Util;
-
-         ($SIGPIPE_R, $SIGPIPE_W) = AnyEvent::Util::portable_pipe ();
-         AnyEvent::Util::fh_nonblocking ($SIGPIPE_R) if $SIGPIPE_R;
-         AnyEvent::Util::fh_nonblocking ($SIGPIPE_W) if $SIGPIPE_W; # just in case
       } else {
-         pipe $SIGPIPE_R, $SIGPIPE_W;
-         fcntl $SIGPIPE_R, &Fcntl::F_SETFL, &Fcntl::O_NONBLOCK if $SIGPIPE_R;
-         fcntl $SIGPIPE_W, &Fcntl::F_SETFL, &Fcntl::O_NONBLOCK if $SIGPIPE_W; # just in case
+         warn "AnyEvent: using emulated perl signal handling with latency timer.\n" if $VERBOSE >= 8;
 
-         # not strictly required, as $^F is normally 2, but let's make sure...
-         fcntl $SIGPIPE_R, &Fcntl::F_SETFD, &Fcntl::FD_CLOEXEC;
-         fcntl $SIGPIPE_W, &Fcntl::F_SETFD, &Fcntl::FD_CLOEXEC;
+         require Fcntl;
+
+         if (AnyEvent::WIN32) {
+            require AnyEvent::Util;
+
+            ($SIGPIPE_R, $SIGPIPE_W) = AnyEvent::Util::portable_pipe ();
+            AnyEvent::Util::fh_nonblocking ($SIGPIPE_R, 1) if $SIGPIPE_R;
+            AnyEvent::Util::fh_nonblocking ($SIGPIPE_W, 1) if $SIGPIPE_W; # just in case
+         } else {
+            pipe $SIGPIPE_R, $SIGPIPE_W;
+            fcntl $SIGPIPE_R, &Fcntl::F_SETFL, &Fcntl::O_NONBLOCK if $SIGPIPE_R;
+            fcntl $SIGPIPE_W, &Fcntl::F_SETFL, &Fcntl::O_NONBLOCK if $SIGPIPE_W; # just in case
+
+            # not strictly required, as $^F is normally 2, but let's make sure...
+            fcntl $SIGPIPE_R, &Fcntl::F_SETFD, &Fcntl::FD_CLOEXEC;
+            fcntl $SIGPIPE_W, &Fcntl::F_SETFD, &Fcntl::FD_CLOEXEC;
+         }
+
+         $SIGPIPE_R
+            or Carp::croak "AnyEvent: unable to create a signal reporting pipe: $!\n";
+
+         $SIG_IO = AnyEvent->io (fh => $SIGPIPE_R, poll => "r", cb => \&_signal_exec);
       }
 
-      $SIGPIPE_R
-         or Carp::croak "AnyEvent: unable to create a signal reporting pipe: $!\n";
+      *signal = sub {
+         my (undef, %arg) = @_;
 
-      $SIG_IO = AnyEvent->io (fh => $SIGPIPE_R, poll => "r", cb => \&_signal_exec);
-   }
+         my $signal = uc $arg{signal}
+            or Carp::croak "required option 'signal' is missing";
 
-   *signal = \&_signal;
+         if ($HAVE_ASYNC_INTERRUPT) {
+            # async::interrupt
+
+            $signal = sig2num $signal;
+            $SIG_CB{$signal}{$arg{cb}} = $arg{cb};
+
+            $SIG_ASY{$signal} ||= new Async::Interrupt
+               cb             => sub { undef $SIG_EV{$signal} },
+               signal         => $signal,
+               pipe           => [$SIGPIPE_R->filenos],
+               pipe_autodrain => 0,
+            ;
+
+         } else {
+            # pure perl
+
+            # AE::Util has been loaded in signal
+            $signal = sig2name $signal;
+            $SIG_CB{$signal}{$arg{cb}} = $arg{cb};
+
+            $SIG{$signal} ||= sub {
+               local $!;
+               syswrite $SIGPIPE_W, "\x00", 1 unless %SIG_EV;
+               undef $SIG_EV{$signal};
+            };
+
+            # can't do signal processing without introducing races in pure perl,
+            # so limit the signal latency.
+            _sig_add;
+         }
+
+         bless [$signal, $arg{cb}], "AnyEvent::Base::signal"
+      };
+
+      *AnyEvent::Base::signal::DESTROY = sub {
+         my ($signal, $cb) = @{$_[0]};
+
+         _sig_del;
+
+         delete $SIG_CB{$signal}{$cb};
+
+         $HAVE_ASYNC_INTERRUPT
+            ? delete $SIG_ASY{$signal}
+            : # delete doesn't work with older perls - they then
+              # print weird messages, or just unconditionally exit
+              # instead of getting the default action.
+              undef $SIG{$signal}
+            unless keys %{ $SIG_CB{$signal} };
+      };
+   };
+   die if $@;
    &signal
-}
-
-sub AnyEvent::Base::signal::DESTROY {
-   my ($signal, $cb) = @{$_[0]};
-
-   _sig_del;
-
-   delete $SIG_CB{$signal}{$cb};
-
-   $HAVE_ASYNC_INTERRUPT
-      ? delete $SIG_ASY{$signal}
-      : # delete doesn't work with older perls - they then
-        # print weird messages, or just unconditionally exit
-        # instead of getting the default action.
-        undef $SIG{$signal}
-      unless keys %{ $SIG_CB{$signal} };
 }
 
 # default implementation for ->child
@@ -1566,8 +1636,14 @@ sub recv {
 }
 
 sub cb {
-   $_[0]{_ae_cb} = $_[1] if @_ > 1;
-   $_[0]{_ae_cb}
+   my $cv = shift;
+
+   @_
+      and $cv->{_ae_cb} = shift
+      and $cv->{_ae_sent}
+      and (delete $cv->{_ae_cb})->($cv);
+
+   $cv->{_ae_cb}
 }
 
 sub begin {
@@ -1583,6 +1659,48 @@ sub end {
 # undocumented/compatibility with pre-3.4
 *broadcast = \&send;
 *wait      = \&_wait;
+
+#############################################################################
+# "new" API, currently only emulation of it
+#############################################################################
+
+package AE;
+
+sub io($$$) {
+   AnyEvent->io (fh => $_[0], poll => $_[1] ? "w" : "r", cb => $_[2])
+}
+
+sub timer($$$) {
+   AnyEvent->timer (after => $_[0], interval => $_[1], cb => $_[2]);
+}
+
+sub signal($$) {
+   AnyEvent->signal (signal => $_[0], cb => $_[1]);
+}
+
+sub child($$) {
+   AnyEvent->child (pid => $_[0], cb => $_[1]);
+}
+
+sub idle($) {
+   AnyEvent->idle (cb => $_[0]);
+}
+
+sub cv() {
+   AnyEvent->condvar
+}
+
+sub now() {
+   AnyEvent->now
+}
+
+sub now_update() {
+   AnyEvent->now_update
+}
+
+sub time() {
+   AnyEvent->time
+}
 
 =head1 ERROR AND EXCEPTION HANDLING
 

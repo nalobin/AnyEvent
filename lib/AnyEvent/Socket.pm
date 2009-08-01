@@ -47,7 +47,7 @@ use base 'Exporter';
 
 our @EXPORT = qw(
    getprotobyname
-   parse_hostport
+   parse_hostport format_hostport
    parse_ipv4 parse_ipv6
    parse_ip parse_address
    format_ipv4 format_ipv6
@@ -58,7 +58,7 @@ our @EXPORT = qw(
    tcp_connect
 );
 
-our $VERSION = 4.881;
+our $VERSION = 4.9;
 
 =item $ipn = parse_ipv4 $dotted_quad
 
@@ -229,7 +229,7 @@ C<parse_unix>).
 It also supports defaulting the service name in a simple way by using
 C<$default_service> if no service was detected. If neither a service was
 detected nor a default was specified, then this function returns the
-empty list. The same happens when a parse error weas detected, such as a
+empty list. The same happens when a parse error was detected, such as a
 hostname with a colon in it (the function is rather conservative, though).
 
 Example:
@@ -280,6 +280,22 @@ sub parse_hostport($;$) {
    return if $host =~ /:/ && !parse_ipv6 $host;
 
    ($host, $port)
+}
+
+=item $string = format_hostport $host, $port
+
+Takes a host (in textual form) and a port and formats in unambigiously in
+a way that C<parse_hostport> can parse it again. C<$port> can be C<undef>.
+
+=cut
+
+sub format_hostport($;$) {
+   my ($host, $port) = @_;
+
+   $port = ":$port"  if length $port;
+   $host = "[$host]" if $host =~ /:/;
+
+   "$host$port"
 }
 
 =item $sa_family = address_family $ipn
