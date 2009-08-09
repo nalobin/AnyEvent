@@ -31,7 +31,7 @@ use base 'Exporter';
 our @EXPORT = qw(fh_nonblocking guard fork_call portable_pipe portable_socketpair);
 our @EXPORT_OK = qw(AF_INET6 WSAEWOULDBLOCK WSAEINPROGRESS WSAEINVAL);
 
-our $VERSION = 4.91;
+our $VERSION = $AnyEvent::VERSION;
 
 BEGIN {
    my $af_inet6 = eval { local $SIG{__DIE__}; &Socket::AF_INET6 };
@@ -259,7 +259,7 @@ sub _fork_schedule {
 
          my $buf;
 
-         my $ww; $ww = AnyEvent->io (fh => $r, poll => 'r', cb => sub {
+         my $ww; $ww = AE::io $r, 0, sub {
             my $len = sysread $r, $buf, 65536, length $buf;
 
             if ($len <= 0) {
@@ -280,7 +280,7 @@ sub _fork_schedule {
                # clean up the pid
                waitpid $pid, 0;
             }
-         });
+         };
 
       } elsif (defined $pid) {
          # child
@@ -396,34 +396,30 @@ guard.
 
 =cut
 
-sub guard(&) {
-   if (!$ENV{PERL_ANYEVENT_AVOID_GUARD} && eval "use Guard 0.5 (); 1") {
-      warn "AnyEvent::Util: using Guard module to implement guards.\n" if $AnyEvent::VERBOSE >= 8;
-      *guard = \&Guard::guard;
-   } else {
-      warn "AnyEvent::Util: using pure-perl guard implementation.\n" if $AnyEvent::VERBOSE >= 8;
+if (!$ENV{PERL_ANYEVENT_AVOID_GUARD} && eval { require Guard; $Guard::VERSION >= 0.5 }) {
+   warn "AnyEvent::Util: using Guard module to implement guards.\n" if $AnyEvent::VERBOSE >= 8;
+   *guard = \&Guard::guard;
+} else {
+   warn "AnyEvent::Util: using pure-perl guard implementation.\n" if $AnyEvent::VERBOSE >= 8;
 
-      *AnyEvent::Util::guard::DESTROY = sub {
-         local $@;
+   *AnyEvent::Util::guard::DESTROY = sub {
+      local $@;
 
-         eval {
-            local $SIG{__DIE__};
-            ${$_[0]}->();
-         };
-
-         warn "runtime error in AnyEvent::guard callback: $@" if $@;
+      eval {
+         local $SIG{__DIE__};
+         ${$_[0]}->();
       };
 
-      *AnyEvent::Util::guard::cancel = sub ($) {
-         ${$_[0]} = sub { };
-      };
+      warn "runtime error in AnyEvent::guard callback: $@" if $@;
+   };
 
-      *guard = sub (&) {
-         bless \(my $cb = shift), "AnyEvent::Util::guard"
-      }
-   }
+   *AnyEvent::Util::guard::cancel = sub ($) {
+      ${$_[0]} = sub { };
+   };
 
-   goto &guard;
+   *guard = sub (&) {
+      bless \(my $cb = shift), "AnyEvent::Util::guard"
+   };
 }
 
 1;

@@ -808,12 +808,11 @@ The available backend classes are (every class has its own manpage):
 =item Backends that are autoprobed when no other event loop can be found.
 
 EV is the preferred backend when no other event loop seems to be in
-use. If EV is not installed, then AnyEvent will try Event, and, failing
-that, will fall back to its own pure-perl implementation, which is
-available everywhere as it comes with AnyEvent itself.
+use. If EV is not installed, then AnyEvent will fall back to its own
+pure-perl implementation, which is available everywhere as it comes with
+AnyEvent itself.
 
    AnyEvent::Impl::EV        based on EV (interface to libev, best choice).
-   AnyEvent::Impl::Event     based on Event, very stable, few glitches.
    AnyEvent::Impl::Perl      pure-perl implementation, fast and portable.
 
 =item Backends that are transparently being picked up when they are used.
@@ -824,6 +823,7 @@ them. This means that AnyEvent will automatically pick the right backend
 when the main program loads an event module before anything starts to
 create watchers. Nothing special needs to be done by the main program.
 
+   AnyEvent::Impl::Event     based on Event, very stable, few glitches.
    AnyEvent::Impl::Glib      based on Glib, slow but very stable.
    AnyEvent::Impl::Tk        based on Tk, very broken.
    AnyEvent::Impl::EventLib  based on Event::Lib, leaks memory and worse.
@@ -1117,7 +1117,7 @@ BEGIN { AnyEvent::common_sense }
 
 use Carp ();
 
-our $VERSION = 4.91;
+our $VERSION = '5.0';
 our $MODEL;
 
 our $AUTOLOAD;
@@ -1153,11 +1153,11 @@ our %PROTOCOL; # (ipv4|ipv6) => (1|2), higher numbers are preferred
 
 my @models = (
    [EV::                   => AnyEvent::Impl::EV::   , 1],
-   [Event::                => AnyEvent::Impl::Event::, 1],
    [AnyEvent::Impl::Perl:: => AnyEvent::Impl::Perl:: , 1],
    # everything below here will not (normally) be autoprobed
    # as the pureperl backend should work everywhere
    # and is usually faster
+   [Event::                => AnyEvent::Impl::Event::, 1],
    [Glib::                 => AnyEvent::Impl::Glib:: , 1], # becomes extremely slow with many watchers
    [Event::Lib::           => AnyEvent::Impl::EventLib::], # too buggy
    [Irssi::                => AnyEvent::Impl::Irssi::],    # Irssi has a bogus "Event" package
@@ -1170,9 +1170,10 @@ my @models = (
    # byzantine signal and broken child handling, among others.
    # IO::Async is rather hard to detect, as it doesn't have any
    # obvious default class.
-#   [0, IO::Async::            => AnyEvent::Impl::IOAsync::],  # requires special main program
-#   [0, IO::Async::Loop::      => AnyEvent::Impl::IOAsync::],  # requires special main program
-#   [0, IO::Async::Notifier::  => AnyEvent::Impl::IOAsync::],  # requires special main program
+   [IO::Async::               => AnyEvent::Impl::IOAsync::], # requires special main program
+   [IO::Async::Loop::         => AnyEvent::Impl::IOAsync::], # requires special main program
+   [IO::Async::Notifier::     => AnyEvent::Impl::IOAsync::], # requires special main program
+   [AnyEvent::Impl::IOAsync:: => AnyEvent::Impl::IOAsync::], # requires special main program
 );
 
 our %method = map +($_ => 1),
@@ -1289,30 +1290,38 @@ sub _dupfh($$;$$) {
    ($fh2, $rw)
 }
 
-#############################################################################
-# "new" API, currently only emulation of it
-#############################################################################
+=head1 SIMPLIFIED AE API
+
+Starting with version 5.0, AnyEvent officially supports a second, much
+simpler, API that is designed to reduce the calling, typing and memory
+overhead.
+
+See the L<AE> manpage for details.
+
+=cut
 
 package AE;
+
+our $VERSION = $AnyEvent::VERSION;
 
 sub io($$$) {
    AnyEvent->io (fh => $_[0], poll => $_[1] ? "w" : "r", cb => $_[2])
 }
 
 sub timer($$$) {
-   AnyEvent->timer (after => $_[0], interval => $_[1], cb => $_[2]);
+   AnyEvent->timer (after => $_[0], interval => $_[1], cb => $_[2])
 }
 
 sub signal($$) {
-   AnyEvent->signal (signal => $_[0], cb => $_[1]);
+   AnyEvent->signal (signal => $_[0], cb => $_[1])
 }
 
 sub child($$) {
-   AnyEvent->child (pid => $_[0], cb => $_[1]);
+   AnyEvent->child (pid => $_[0], cb => $_[1])
 }
 
 sub idle($) {
-   AnyEvent->idle (cb => $_[0]);
+   AnyEvent->idle (cb => $_[0])
 }
 
 sub cv(;&) {
@@ -2054,7 +2063,8 @@ timeout) and I/O watchers (watching STDOUT, a pty, to become writable,
 which it is), lets them fire exactly once and destroys them again.
 
 Source code for this benchmark is found as F<eg/bench> in the AnyEvent
-distribution.
+distribution. It uses the L<AE> interface, which makes a real difference
+for the EV and Perl backends only.
 
 =head3 Explanation of the columns
 
@@ -2085,18 +2095,18 @@ watcher.
 =head3 Results
 
           name watchers bytes create invoke destroy comment
-         EV/EV   400000   224   0.47   0.35    0.27 EV native interface
-        EV/Any   100000   224   2.88   0.34    0.27 EV + AnyEvent watchers
-    CoroEV/Any   100000   224   2.85   0.35    0.28 coroutines + Coro::Signal
-      Perl/Any   100000   452   4.13   0.73    0.95 pure perl implementation
-   Event/Event    16000   517  32.20  31.80    0.81 Event native interface
-     Event/Any    16000   590  35.85  31.55    1.06 Event + AnyEvent watchers
-   IOAsync/Any    16000   989  38.10  32.77   11.13 via IO::Async::Loop::IO_Poll
-   IOAsync/Any    16000   990  37.59  29.50   10.61 via IO::Async::Loop::Epoll
-      Glib/Any    16000  1357 102.33  12.31   51.00 quadratic behaviour
-        Tk/Any     2000  1860  27.20  66.31   14.00 SEGV with >> 2000 watchers
-     POE/Event     2000  6328 109.99 751.67   14.02 via POE::Loop::Event
-    POE/Select     2000  6027  94.54 809.13  579.80 via POE::Loop::Select
+         EV/EV   100000   223   0.47   0.43    0.27 EV native interface
+        EV/Any   100000   223   0.48   0.42    0.26 EV + AnyEvent watchers
+  Coro::EV/Any   100000   223   0.47   0.42    0.26 coroutines + Coro::Signal
+      Perl/Any   100000   431   2.70   0.74    0.92 pure perl implementation
+   Event/Event    16000   516  31.16  31.84    0.82 Event native interface
+     Event/Any    16000  1203  42.61  34.79    1.80 Event + AnyEvent watchers
+   IOAsync/Any    16000  1911  41.92  27.45   16.81 via IO::Async::Loop::IO_Poll
+   IOAsync/Any    16000  1726  40.69  26.37   15.25 via IO::Async::Loop::Epoll
+      Glib/Any    16000  1118  89.00  12.57   51.17 quadratic behaviour
+        Tk/Any     2000  1346  20.96  10.75    8.00 SEGV with >> 2000 watchers
+       POE/Any     2000  6951 108.97 795.32   14.24 via POE::Loop::Event
+       POE/Any     2000  6648  94.79 774.40  575.51 via POE::Loop::Select
 
 =head3 Discussion
 
@@ -2118,9 +2128,10 @@ EV, 3100 CPU cycles with AnyEvent's pure perl loop and almost 3000000 CPU
 cycles with POE.
 
 C<EV> is the sole leader regarding speed and memory use, which are both
-maximal/minimal, respectively. Even when going through AnyEvent, it uses
-far less memory than any other event loop and is still faster than Event
-natively.
+maximal/minimal, respectively. When using the L<AE> API there is zero
+overhead (when going through the AnyEvent API create is about 5-6 times
+slower, with other times being equal, so still uses far less memory than
+any other event loop and is still faster than Event natively).
 
 The pure perl implementation is hit in a few sweet spots (both the
 constant timeout and the use of a single fd hit optimisations in the perl
@@ -2204,7 +2215,8 @@ In this benchmark, we use 10000 socket pairs (20000 sockets), of which 100
 connections, most of which are idle at any one point in time.
 
 Source code for this benchmark is found as F<eg/bench2> in the AnyEvent
-distribution.
+distribution. It uses the L<AE> interface, which makes a real difference
+for the EV and Perl backends only.
 
 =head3 Explanation of the columns
 
@@ -2222,13 +2234,13 @@ a new one that moves the timeout into the future.
 =head3 Results
 
      name sockets create  request 
-       EV   20000  69.01    11.16 
-     Perl   20000  73.32    35.87 
-  IOAsync   20000 157.00    98.14 epoll
-  IOAsync   20000 159.31   616.06 poll
-    Event   20000 212.62   257.32 
-     Glib   20000 651.16  1896.30 
-      POE   20000 349.67 12317.24 uses POE::Loop::Event
+       EV   20000  62.66     7.99 
+     Perl   20000  68.32    32.64 
+  IOAsync   20000 174.06   101.15 epoll
+  IOAsync   20000 174.67   610.84 poll
+    Event   20000 202.69   242.91 
+     Glib   20000 557.01  1689.52 
+      POE   20000 341.54 12086.32 uses POE::Loop::Event
 
 =head3 Discussion
 

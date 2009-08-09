@@ -1,4 +1,4 @@
-# $Id: ae2.pl,v 1.1 2009-06-23 12:21:34 root Exp $
+# $Id: ae2.pl,v 1.2 2009-08-06 14:00:36 root Exp $
 # An echo client-server benchmark.
 
 use warnings;
@@ -27,7 +27,7 @@ tcp_server undef, $port, sub {
 my $t = time;
 
 for my $connections (1..$CYCLES) {
-   my $cv = AnyEvent->condvar;
+   my $cv = AE::cv;
 
    tcp_connect "127.0.0.1", $port, sub {
       my ($fh) = @_
