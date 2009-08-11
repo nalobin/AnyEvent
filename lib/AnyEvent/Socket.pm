@@ -63,10 +63,11 @@ our $VERSION = $AnyEvent::VERSION;
 # used in cases where we may return immediately but want the
 # caller to do stuff first
 sub _postpone {
-   my ($cb, @args) = @_;
+   my ($cb, @args) = (@_, $!);
 
    my $w; $w = AE::timer 0, 0, sub {
       undef $w;
+      $! = pop @args;
       $cb->(@args);
    };
 }
@@ -781,7 +782,7 @@ to 15 seconds.
 
          $handle->push_write ("GET / HTTP/1.0\015\012\015\012");
 
-         $handle->push_read_line ("\015\012\015\012", sub {
+         $handle->push_read (line => "\015\012\015\012", sub {
             my ($handle, $line) = @_;
 
             # print response header
