@@ -594,7 +594,7 @@ Example: wait for a timer.
    );
 
    # this "blocks" (while handling events) till the callback
-   # calls -<send
+   # calls ->send
    $result_ready->recv;
 
 Example: wait for a timer, but take advantage of the fact that condition
@@ -1118,7 +1118,7 @@ BEGIN { AnyEvent::common_sense }
 
 use Carp ();
 
-our $VERSION = '5.111';
+our $VERSION = '5.112';
 our $MODEL;
 
 our $AUTOLOAD;
