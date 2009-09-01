@@ -1108,8 +1108,8 @@ package AnyEvent;
 
 # basically a tuned-down version of common::sense
 sub common_sense {
-   # no warnings
-   ${^WARNING_BITS} ^= ${^WARNING_BITS};
+   # from common:.sense 1.0
+   ${^WARNING_BITS} = "\xfc\x3f\xf3\x00\x0f\xf3\xcf\xc0\xf3\xfc\x33\x03";
    # use strict vars subs
    $^H |= 0x00000600;
 }
@@ -1118,7 +1118,7 @@ BEGIN { AnyEvent::common_sense }
 
 use Carp ();
 
-our $VERSION = '5.112';
+our $VERSION = '5.12';
 our $MODEL;
 
 our $AUTOLOAD;
@@ -1345,7 +1345,7 @@ package AnyEvent::Base;
 
 # default implementations for many methods
 
-sub _time {
+sub _time() {
    # probe for availability of Time::HiRes
    if (eval "use Time::HiRes (); Time::HiRes::time (); 1") {
       warn "AnyEvent: using Time::HiRes for sub-second timing accuracy.\n" if $VERBOSE >= 8;
@@ -1375,7 +1375,7 @@ our $HAVE_ASYNC_INTERRUPT;
 
 sub _have_async_interrupt() {
    $HAVE_ASYNC_INTERRUPT = 1*(!$ENV{PERL_ANYEVENT_AVOID_ASYNC_INTERRUPT}
-                              && eval "use Async::Interrupt 1.0 (); 1")
+                              && eval "use Async::Interrupt 1.02 (); 1")
       unless defined $HAVE_ASYNC_INTERRUPT;
 
    $HAVE_ASYNC_INTERRUPT
@@ -1914,16 +1914,9 @@ program when the user enters quit:
       },
    );
 
-   my $time_watcher; # can only be used once
-
-   sub new_timer {
-      $timer = AnyEvent->timer (after => 1, cb => sub {
-         warn "timeout\n"; # print 'timeout' about every second
-         &new_timer; # and restart the time
-      });
-   }
-
-   new_timer; # create first timer
+   my $time_watcher = AnyEvent->timer (after => 1, interval => 1, cb => sub {
+      warn "timeout\n"; # print 'timeout' at most every second
+   });
 
    $cv->recv; # wait until user enters /^q/i
 
@@ -2377,13 +2370,13 @@ hand-optimised "raw sockets benchmark", while AnyEvent + its pure perl
 backend easily beats IO::Lambda and POE.
 
 And even the 100% non-blocking version written using the high-level (and
-slow :) L<AnyEvent::Handle> abstraction beats both POE and IO::Lambda by a
-large margin, even though it does all of DNS, tcp-connect and socket I/O
-in a non-blocking way.
+slow :) L<AnyEvent::Handle> abstraction beats both POE and IO::Lambda
+higher level ("unoptimised") abstractions by a large margin, even though
+it does all of DNS, tcp-connect and socket I/O in a non-blocking way.
 
 The two AnyEvent benchmarks programs can be found as F<eg/ae0.pl> and
 F<eg/ae2.pl> in the AnyEvent distribution, the remaining benchmarks are
-part of the IO::lambda distribution and were used without any changes.
+part of the IO::Lambda distribution and were used without any changes.
 
 
 =head1 SIGNALS
