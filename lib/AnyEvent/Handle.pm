@@ -62,6 +62,21 @@ use AnyEvent::Util qw(WSAEWOULDBLOCK);
 
 our $VERSION = $AnyEvent::VERSION;
 
+sub _load_func($) {
+   my $func = $_[0];
+
+   unless (defined &$func) {
+      my $pkg = $func;
+      do {
+         $pkg =~ s/::[^:]+$//
+            or return;
+         eval "require $pkg";
+      } until defined &$func;
+   }
+
+   \&$func
+}
+
 =head1 METHODS
 
 =over 4
@@ -116,16 +131,17 @@ The actual numeric host and port (the socket peername) are passed as
 parameters, together with a retry callback.
 
 When, for some reason, the handle is not acceptable, then calling
-C<$retry> will continue with the next conenction target (in case of
+C<$retry> will continue with the next connection target (in case of
 multi-homed hosts or SRV records there can be multiple connection
-endpoints). When it is called then the read and write queues, eof status,
-tls status and similar properties of the handle are being reset.
+endpoints). At the time it is called the read and write queues, eof
+status, tls status and similar properties of the handle will have been
+reset.
 
 In most cases, ignoring the C<$retry> parameter is the way to go.
 
 =item on_connect_error => $cb->($handle, $message)
 
-This callback is called when the conenction could not be
+This callback is called when the connection could not be
 established. C<$!> will contain the relevant error code, and C<$message> a
 message describing it (usually the same as C<"$!">).
 
@@ -287,6 +303,38 @@ accomplishd by setting this option to a true value.
 The default is your opertaing system's default behaviour (most likely
 enabled), this option explicitly enables or disables it, if possible.
 
+=item keepalive => <boolean>
+
+Enables (default disable) the SO_KEEPALIVE option on the stream socket:
+normally, TCP connections have no time-out once established, so TCP
+connections, once established, can stay alive forever even when the other
+side has long gone. TCP keepalives are a cheap way to take down long-lived
+TCP connections whent he other side becomes unreachable. While the default
+is OS-dependent, TCP keepalives usually kick in after around two hours,
+and, if the other side doesn't reply, take down the TCP connection some 10
+to 15 minutes later.
+
+It is harmless to specify this option for file handles that do not support
+keepalives, and enabling it on connections that are potentially long-lived
+is usually a good idea.
+
+=item oobinline => <boolean>
+
+BSD majorly fucked up the implementation of TCP urgent data. The result
+is that almost no OS implements TCP according to the specs, and every OS
+implements it slightly differently.
+
+If you want to handle TCP urgent data, then setting this flag (the default
+is enabled) gives you the most portable way of getting urgent data, by
+putting it into the stream.
+
+Since BSD emulation of OOB data on top of TCP's urgent data can have
+security implications, AnyEvent::Handle sets this flag automatically
+unless explicitly specified. Note that setting this flag after
+establishing a connection I<may> be a bit too late (data loss could
+already have occured on BSD systems), but at least it will protect you
+from most attacks.
+
 =item read_size => <bytes>
 
 The default read block size (the amount of bytes this module will
@@ -329,7 +377,7 @@ C<undef>.
 =item tls => "accept" | "connect" | Net::SSLeay::SSL object
 
 When this parameter is given, it enables TLS (SSL) mode, that means
-AnyEvent will start a TLS handshake as soon as the conenction has been
+AnyEvent will start a TLS handshake as soon as the connection has been
 established and will transparently encrypt/decrypt data afterwards.
 
 All TLS protocol errors will be signalled as C<EPROTO>, with an
@@ -492,16 +540,19 @@ sub _start {
    $self->{_ractivity} =
    $self->{_wactivity} = AE::now;
 
-   $self->timeout  (delete $self->{timeout} ) if $self->{timeout};
-   $self->rtimeout (delete $self->{rtimeout}) if $self->{rtimeout};
-   $self->wtimeout (delete $self->{wtimeout}) if $self->{wtimeout};
+   $self->timeout   (delete $self->{timeout}  ) if $self->{timeout};
+   $self->rtimeout  (delete $self->{rtimeout} ) if $self->{rtimeout};
+   $self->wtimeout  (delete $self->{wtimeout} ) if $self->{wtimeout};
 
-   $self->no_delay (delete $self->{no_delay}) if exists $self->{no_delay};
+   $self->no_delay  (delete $self->{no_delay} ) if exists $self->{no_delay}  && $self->{no_delay};
+   $self->keepalive (delete $self->{keepalive}) if exists $self->{keepalive} && $self->{keepalive};
 
-   $self->starttls (delete $self->{tls}, delete $self->{tls_ctx})
+   $self->oobinline (exists $self->{oobinline} ? delete $self->{oobinline} : 1);
+
+   $self->starttls  (delete $self->{tls}, delete $self->{tls_ctx})
       if $self->{tls};
 
-   $self->on_drain (delete $self->{on_drain}) if $self->{on_drain};
+   $self->on_drain  (delete $self->{on_drain}) if $self->{on_drain};
 
    $self->start_read
       if $self->{on_read} || @{ $self->{_queue} };
@@ -518,7 +569,7 @@ sub _error {
    if ($self->{on_error}) {
       $self->{on_error}($self, $fatal, $message);
       $self->destroy if $fatal;
-   } elsif ($self->{fh}) {
+   } elsif ($self->{fh} || $self->{connect}) {
       $self->destroy;
       Carp::croak "AnyEvent::Handle uncaught error: $message";
    }
@@ -589,7 +640,58 @@ sub no_delay {
 
    eval {
       local $SIG{__DIE__};
-      setsockopt $_[0]{fh}, &Socket::IPPROTO_TCP, &Socket::TCP_NODELAY, int $_[1]
+      setsockopt $_[0]{fh}, Socket::IPPROTO_TCP (), Socket::TCP_NODELAY (), int $_[1]
+         if $_[0]{fh};
+   };
+}
+
+=item $handle->keepalive ($boolean)
+
+Enables or disables the C<keepalive> setting (see constructor argument of
+the same name for details).
+
+=cut
+
+sub keepalive {
+   $_[0]{keepalive} = $_[1];
+
+   eval {
+      local $SIG{__DIE__};
+      setsockopt $_[0]{fh}, Socket::SOL_SOCKET (), Socket::SO_KEEPALIVE (), int $_[1]
+         if $_[0]{fh};
+   };
+}
+
+=item $handle->oobinline ($boolean)
+
+Enables or disables the C<oobinline> setting (see constructor argument of
+the same name for details).
+
+=cut
+
+sub oobinline {
+   $_[0]{oobinline} = $_[1];
+
+   eval {
+      local $SIG{__DIE__};
+      setsockopt $_[0]{fh}, Socket::SOL_SOCKET (), Socket::SO_OOBINLINE (), int $_[1]
+         if $_[0]{fh};
+   };
+}
+
+=item $handle->keepalive ($boolean)
+
+Enables or disables the C<keepalive> setting (see constructor argument of
+the same name for details).
+
+=cut
+
+sub keepalive {
+   $_[0]{keepalive} = $_[1];
+
+   eval {
+      local $SIG{__DIE__};
+      setsockopt $_[0]{fh}, Socket::SOL_SOCKET (), Socket::SO_KEEPALIVE (), int $_[1]
          if $_[0]{fh};
    };
 }
@@ -787,6 +889,7 @@ sub _drain_wbuf {
 
 our %WH;
 
+# deprecated
 sub register_write_type($$) {
    $WH{$_[0]} = $_[1];
 }
@@ -797,7 +900,8 @@ sub push_write {
    if (@_ > 1) {
       my $type = shift;
 
-      @_ = ($WH{$type} or Carp::croak "unsupported type passed to AnyEvent::Handle::push_write")
+      @_ = ($WH{$type} ||= _load_func "$type\::anyevent_write_type"
+            or Carp::croak "unsupported/unloadable type '$type' passed to AnyEvent::Handle::push_write")
            ->($self, @_);
    }
 
@@ -812,8 +916,11 @@ sub push_write {
 
 =item $handle->push_write (type => @args)
 
-Instead of formatting your data yourself, you can also let this module do
-the job by specifying a type and type-specific arguments.
+Instead of formatting your data yourself, you can also let this module
+do the job by specifying a type and type-specific arguments. You
+can also specify the (fully qualified) name of a package, in which
+case AnyEvent tries to load the package and then expects to find the
+C<anyevent_read_type> function inside (see "custom write types", below).
 
 Predefined types are (if you have ideas for additional types, feel free to
 drop by and tell us):
@@ -935,17 +1042,37 @@ sub push_shutdown {
    $self->on_drain (sub { shutdown $_[0]{fh}, 1 });
 }
 
-=item AnyEvent::Handle::register_write_type type => $coderef->($handle, @args)
+=item custom write types - Package::anyevent_write_type $handle, @args
 
-This function (not method) lets you add your own types to C<push_write>.
-Whenever the given C<type> is used, C<push_write> will invoke the code
-reference with the handle object and the remaining arguments.
+Instead of one of the predefined types, you can also specify the name of
+a package. AnyEvent will try to load the package and then expects to find
+a function named C<anyevent_write_type> inside. If it isn't found, it
+progressively tries to load the parent package until it either finds the
+function (good) or runs out of packages (bad).
 
-The code reference is supposed to return a single octet string that will
-be appended to the write buffer.
+Whenever the given C<type> is used, C<push_write> will the function with
+the handle object and the remaining arguments.
 
-Note that this is a function, and all types registered this way will be
-global, so try to use unique names.
+The function is supposed to return a single octet string that will be
+appended to the write buffer, so you cna mentally treat this function as a
+"arguments to on-the-wire-format" converter.
+
+Example: implement a custom write type C<join> that joins the remaining
+arguments using the first one.
+
+   $handle->push_write (My::Type => " ", 1,2,3);
+
+   # uses the following package, which can be defined in the "My::Type" or in
+   # the "My" modules to be auto-loaded, or just about anywhere when the
+   # My::Type::anyevent_write_type is defined before invoking it.
+
+   package My::Type;
+
+   sub anyevent_write_type {
+      my ($handle, $delim, @args) = @_;
+
+      join $delim, @args
+   }
 
 =cut
 
@@ -1174,7 +1301,8 @@ sub push_read {
    if (@_) {
       my $type = shift;
 
-      $cb = ($RH{$type} or Carp::croak "unsupported type passed to AnyEvent::Handle::push_read")
+      $cb = ($RH{$type} ||= _load_func "$type\::anyevent_read_type"
+             or Carp::croak "unsupported/unloadable type '$type' passed to AnyEvent::Handle::push_read")
             ->($self, $cb, @_);
    }
 
@@ -1203,7 +1331,9 @@ sub unshift_read {
 
 Instead of providing a callback that parses the data itself you can chose
 between a number of predefined parsing formats, for chunks of data, lines
-etc.
+etc. You can also specify the (fully qualified) name of a package, in
+which case AnyEvent tries to load the package and then expects to find the
+C<anyevent_read_type> function inside (see "custom read types", below).
 
 Predefined types are (if you have ideas for additional types, feel free to
 drop by and tell us):
@@ -1532,25 +1662,28 @@ register_read_type storable => sub {
 
 =back
 
-=item AnyEvent::Handle::register_read_type type => $coderef->($handle, $cb, @args)
+=item custom read types - Package::anyevent_read_type $handle, $cb, @args
 
-This function (not method) lets you add your own types to C<push_read>.
+Instead of one of the predefined types, you can also specify the name
+of a package. AnyEvent will try to load the package and then expects to
+find a function named C<anyevent_read_type> inside. If it isn't found, it
+progressively tries to load the parent package until it either finds the
+function (good) or runs out of packages (bad).
 
-Whenever the given C<type> is used, C<push_read> will invoke the code
-reference with the handle object, the callback and the remaining
-arguments.
+Whenever this type is used, C<push_read> will invoke the function with the
+handle object, the original callback and the remaining arguments.
 
-The code reference is supposed to return a callback (usually a closure)
-that works as a plain read callback (see C<< ->push_read ($cb) >>).
+The function is supposed to return a callback (usually a closure) that
+works as a plain read callback (see C<< ->push_read ($cb) >>), so you can
+mentally treat the function as a "configurable read type to read callback"
+converter.
 
-It should invoke the passed callback when it is done reading (remember to
-pass C<$handle> as first argument as all other callbacks do that).
+It should invoke the original callback when it is done reading (remember
+to pass C<$handle> as first argument as all other callbacks do that,
+although there is no strict requirement on this).
 
-Note that this is a function, and all types registered this way will be
-global, so try to use unique names.
-
-For examples, see the source of this module (F<perldoc -m AnyEvent::Handle>,
-search for C<register_read_type>)).
+For examples, see the source of this module (F<perldoc -m
+AnyEvent::Handle>, search for C<register_read_type>)).
 
 =item $handle->stop_read
 
