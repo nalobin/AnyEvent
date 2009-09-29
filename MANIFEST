@@ -48,3 +48,4 @@ eg/handle
 eg/ae0.pl
 eg/ae2.pl
 META.yml                                 Module meta-data (added by MakeMaker)
+META.json                                Module meta-data (added by MakeMaker)
