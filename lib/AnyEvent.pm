@@ -405,6 +405,23 @@ Example: exit on SIGINT
 
    my $w = AnyEvent->signal (signal => "INT", cb => sub { exit 1 });
 
+=head3 Restart Behaviour
+
+While restart behaviour is up to the event loop implementation, most will
+not restart syscalls (that includes L<Async::Interrupt> and AnyEvent's
+pure perl implementation).
+
+=head3 Safe/Unsafe Signals
+
+Perl signals can be either "safe" (synchronous to opcode handling) or
+"unsafe" (asynchronous) - the former might get delayed indefinitely, the
+latter might corrupt your memory.
+
+AnyEvent signal handlers are, in addition, synchronous to the event loop,
+i.e. they will not interrupt your running perl program but will only be
+called as part of the normal event handling (just like timer, I/O etc.
+callbacks, too).
+
 =head3 Signal Races, Delays and Workarounds
 
 Many event loops (e.g. Glib, Tk, Qt, IO::Async) do not support attaching
@@ -1116,7 +1133,7 @@ package AnyEvent;
 # basically a tuned-down version of common::sense
 sub common_sense {
    # from common:.sense 1.0
-   ${^WARNING_BITS} = "\xfc\x3f\xf3\x00\x0f\xf3\xcf\xc0\xf3\xfc\x33\x03";
+   ${^WARNING_BITS} = "\xfc\x3f\x33\x00\x0f\xf3\xcf\xc0\xf3\xfc\x33\x03";
    # use strict vars subs
    $^H |= 0x00000600;
 }
@@ -1125,7 +1142,7 @@ BEGIN { AnyEvent::common_sense }
 
 use Carp ();
 
-our $VERSION = '5.21';
+our $VERSION = '5.22';
 our $MODEL;
 
 our $AUTOLOAD;
@@ -2433,8 +2450,8 @@ it's built-in modules) are required to use it.
 That does not mean that AnyEvent won't take advantage of some additional
 modules if they are installed.
 
-This section epxlains which additional modules will be used, and how they
-affect AnyEvent's operetion.
+This section explains which additional modules will be used, and how they
+affect AnyEvent's operation.
 
 =over 4
 
@@ -2449,7 +2466,7 @@ C<$AnyEvent::MAX_SIGNAL_LATENCY>).
 
 If this module is available, then it will be used to implement signal
 catching, which means that signals will not be delayed, and the event loop
-will not be interrupted regularly, which is more efficient (And good for
+will not be interrupted regularly, which is more efficient (and good for
 battery life on laptops).
 
 This affects not just the pure-perl event loop, but also other event loops
@@ -2509,9 +2526,19 @@ Most event libraries are not fork-safe. The ones who are usually are
 because they rely on inefficient but fork-safe C<select> or C<poll>
 calls. Only L<EV> is fully fork-aware.
 
+This means that, in general, you cannot fork and do event processing
+in the child if a watcher was created before the fork (which in turn
+initialises the event library).
+
 If you have to fork, you must either do so I<before> creating your first
 watcher OR you must not use AnyEvent at all in the child OR you must do
 something completely out of the scope of AnyEvent.
+
+The problem of doing event processing in the parent I<and> the child
+is much more complicated: even for backends that I<are> fork-aware or
+fork-safe, their behaviour is not usually what you want: fork clones all
+watchers, that means all timers, I/O watchers etc. are active in both
+parent and child, which is almost never what you want.
 
 
 =head1 SECURITY CONSIDERATIONS

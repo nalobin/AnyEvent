@@ -1,5 +1,19 @@
 Revision history for Perl extension AnyEvent.
 
+5.22  Sat Dec  5 03:51:13 CET 2009
+	- downgrade-or-fail in AnyEvent::Handle::push_write, to
+          diagnose encoding failures earlier and more succinctly.
+          (this works around bugs in perl, throwing away encoding info
+          when passing scalar data to extensions).
+        - add more examples to AnyEvent::Socket manpage.
+        - upgrade internal warning set to the same as common::sense 2.03.
+        - use pack "n/a*" for pre-5.8.9 perl compatibility in AnyEvent::DNS
+          (John Beppu).
+        - AnyEvent::Socket::inet_aton now properly supports ipv6, as documented.
+        - add google public dns servers to fallback server set and make sure
+          we load-balance properly between the three sets. also add all
+          fallback dns servers, not just a random one, to each dns config.
+
 5.21  Thu Nov 19 02:48:47 CET 2009
 	- fix a problem where socket constants were called with parameters
           (spotted by David Friedland).
