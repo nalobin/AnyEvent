@@ -968,12 +968,25 @@ if it is defined then the event loop has already been detected, and the
 array will be ignored.
 
 Best use C<AnyEvent::post_detect { BLOCK }> when your application allows
-it,as it takes care of these details.
+it, as it takes care of these details.
 
 This variable is mainly useful for modules that can do something useful
 when AnyEvent is used and thus want to know when it is initialised, but do
 not need to even load it by default. This array provides the means to hook
 into AnyEvent passively, without loading it.
+
+Example: To load Coro::AnyEvent whenever Coro and AnyEvent are used
+together, you could put this into Coro (this is the actual code used by
+Coro to accomplish this):
+
+   if (defined $AnyEvent::MODEL) {
+      # AnyEvent already initialised, so load Coro::AnyEvent
+      require Coro::AnyEvent;
+   } else {
+      # AnyEvent not yet initialised, so make sure to load Coro::AnyEvent
+      # as soon as it is
+      push @AnyEvent::post_detect, sub { require Coro::AnyEvent };
+   }
 
 =back
 
@@ -1133,8 +1146,8 @@ package AnyEvent;
 # basically a tuned-down version of common::sense
 sub common_sense {
    # from common:.sense 1.0
-   ${^WARNING_BITS} = "\xfc\x3f\x33\x00\x0f\xf3\xcf\xc0\xf3\xfc\x33\x03";
-   # use strict vars subs
+   ${^WARNING_BITS} = "\xfc\x3f\x33\x00\x0f\xf3\xcf\xc0\xf3\xfc\x33\x00";
+   # use strict vars subs - NO UTF-8, as Util.pm doesn't like this atm. (uts46data.pl)
    $^H |= 0x00000600;
 }
 
@@ -1142,7 +1155,7 @@ BEGIN { AnyEvent::common_sense }
 
 use Carp ();
 
-our $VERSION = '5.22';
+our $VERSION = '5.23';
 our $MODEL;
 
 our $AUTOLOAD;
