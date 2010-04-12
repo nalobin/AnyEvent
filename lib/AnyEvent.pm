@@ -9,7 +9,10 @@ and POE are various supported event loops/environments.
 
    use AnyEvent;
 
-   # file descriptor readable
+   # if you prefer function calls, look at the L<AE> manpage for
+   # an alternative API.
+
+   # file handle or descriptor readable
    my $w = AnyEvent->io (fh => $fh, poll => "r", cb => sub { ...  });
 
    # one-shot or repeating timers
@@ -608,21 +611,21 @@ for the send to occur.
 
 Example: wait for a timer.
 
-   # wait till the result is ready
-   my $result_ready = AnyEvent->condvar;
+   # condition: "wait till the timer is fired"
+   my $timer_fired = AnyEvent->condvar;
 
-   # do something such as adding a timer
-   # or socket watcher the calls $result_ready->send
-   # when the "result" is ready.
+   # create the timer - we could wait for, say
+   # a handle becomign ready, or even an
+   # AnyEvent::HTTP request to finish, but
    # in this case, we simply use a timer:
    my $w = AnyEvent->timer (
       after => 1,
-      cb    => sub { $result_ready->send },
+      cb    => sub { $timer_fired->send },
    );
 
    # this "blocks" (while handling events) till the callback
    # calls ->send
-   $result_ready->recv;
+   $timer_fired->recv;
 
 Example: wait for a timer, but take advantage of the fact that condition
 variables are also callable directly.
@@ -1158,7 +1161,7 @@ BEGIN { AnyEvent::common_sense }
 
 use Carp ();
 
-our $VERSION = '5.251';
+our $VERSION = '5.26';
 our $MODEL;
 
 our $AUTOLOAD;
@@ -1171,7 +1174,7 @@ our $VERBOSE;
 BEGIN {
    require "AnyEvent/constants.pl";
 
-   eval "sub TAINT (){" . (${^TAINT}          *1) . "}";
+   eval "sub TAINT (){" . (${^TAINT}*1) . "}";
 
    delete @ENV{grep /^PERL_ANYEVENT_/, keys %ENV}
       if ${^TAINT};
@@ -1224,17 +1227,11 @@ our @post_detect;
 sub post_detect(&) {
    my ($cb) = @_;
 
-   if ($MODEL) {
-      $cb->();
+   push @post_detect, $cb;
 
-      undef
-   } else {
-      push @post_detect, $cb;
-
-      defined wantarray
-         ? bless \$cb, "AnyEvent::Util::postdetect"
-         : ()
-   }
+   defined wantarray
+      ? bless \$cb, "AnyEvent::Util::postdetect"
+      : ()
 }
 
 sub AnyEvent::Util::postdetect::DESTROY {
@@ -1297,9 +1294,22 @@ sub detect() {
    push @{"$MODEL\::ISA"}, "AnyEvent::Base";
    unshift @ISA, $MODEL;
 
+   # now nuke some methods that are overriden by the backend.
+   # SUPER is not allowed.
+   for (qw(time signal child idle)) {
+      undef &{"AnyEvent::Base::$_"}
+         if defined &{"$MODEL\::$_"};
+   }
+
    require AnyEvent::Strict if $ENV{PERL_ANYEVENT_STRICT};
 
    (shift @post_detect)->() while @post_detect;
+
+   *post_detect = sub(&) {
+      shift->();
+
+      undef
+   };
 
    $MODEL
 }
@@ -1337,7 +1347,7 @@ sub _dupfh($$;$$) {
 
 Starting with version 5.0, AnyEvent officially supports a second, much
 simpler, API that is designed to reduce the calling, typing and memory
-overhead.
+overhead by using function call syntax and a fixed number of parameters.
 
 See the L<AE> manpage for details.
 
@@ -1346,6 +1356,9 @@ See the L<AE> manpage for details.
 package AE;
 
 our $VERSION = $AnyEvent::VERSION;
+
+# fall back to the main API by default - backends and AnyEvent::Base
+# implementations can overwrite these.
 
 sub io($$$) {
    AnyEvent->io (fh => $_[0], poll => $_[1] ? "w" : "r", cb => $_[2])
@@ -1387,31 +1400,44 @@ package AnyEvent::Base;
 
 # default implementations for many methods
 
-sub _time() {
-   eval q{ # poor man's autoloading
+sub time {
+   eval q{ # poor man's autoloading {}
       # probe for availability of Time::HiRes
       if (eval "use Time::HiRes (); Time::HiRes::time (); 1") {
          warn "AnyEvent: using Time::HiRes for sub-second timing accuracy.\n" if $VERBOSE >= 8;
-         *_time = \&Time::HiRes::time;
+         *AE::time = \&Time::HiRes::time;
          # if (eval "use POSIX (); (POSIX::times())...
       } else {
          warn "AnyEvent: using built-in time(), WARNING, no sub-second resolution!\n" if $VERBOSE;
-         *_time = sub (){ time }; # epic fail
+         *AE::time = sub (){ time }; # epic fail
       }
+
+      *time = sub { AE::time }; # different prototypes
    };
    die if $@;
 
-   &_time
+   &time
 }
 
-sub time { _time }
-sub now  { _time }
+*now = \&time;
+
 sub now_update { }
 
 # default implementation for ->condvar
 
 sub condvar {
-   bless { @_ == 3 ? (_ae_cb => $_[2]) : () }, "AnyEvent::CondVar"
+   eval q{ # poor man's autoloading {}
+      *condvar = sub {
+         bless { @_ == 3 ? (_ae_cb => $_[2]) : () }, "AnyEvent::CondVar"
+      };
+
+      *AE::cv = sub (;&) {
+         bless { @_ ? (_ae_cb => shift) : () }, "AnyEvent::CondVar"
+      };
+   };
+   die if $@;
+
+   &condvar
 }
 
 # default implementation for ->signal
@@ -1451,7 +1477,7 @@ sub _sig_del {
 }
 
 our $_sig_name_init; $_sig_name_init = sub {
-   eval q{ # poor man's autoloading
+   eval q{ # poor man's autoloading {}
       undef $_sig_name_init;
 
       if (_have_async_interrupt) {
@@ -1515,45 +1541,43 @@ sub signal {
          $SIG_IO = AE::io $SIGPIPE_R, 0, \&_signal_exec;
       }
 
-      *signal = sub {
-         my (undef, %arg) = @_;
+      *signal = $HAVE_ASYNC_INTERRUPT
+         ? sub {
+              my (undef, %arg) = @_;
 
-         my $signal = uc $arg{signal}
-            or Carp::croak "required option 'signal' is missing";
+              # async::interrupt
+              my $signal = sig2num $arg{signal};
+              $SIG_CB{$signal}{$arg{cb}} = $arg{cb};
 
-         if ($HAVE_ASYNC_INTERRUPT) {
-            # async::interrupt
+              $SIG_ASY{$signal} ||= new Async::Interrupt
+                 cb             => sub { undef $SIG_EV{$signal} },
+                 signal         => $signal,
+                 pipe           => [$SIGPIPE_R->filenos],
+                 pipe_autodrain => 0,
+              ;
 
-            $signal = sig2num $signal;
-            $SIG_CB{$signal}{$arg{cb}} = $arg{cb};
+              bless [$signal, $arg{cb}], "AnyEvent::Base::signal"
+           }
+         : sub {
+              my (undef, %arg) = @_;
 
-            $SIG_ASY{$signal} ||= new Async::Interrupt
-               cb             => sub { undef $SIG_EV{$signal} },
-               signal         => $signal,
-               pipe           => [$SIGPIPE_R->filenos],
-               pipe_autodrain => 0,
-            ;
+              # pure perl
+              my $signal = sig2name $arg{signal};
+              $SIG_CB{$signal}{$arg{cb}} = $arg{cb};
 
-         } else {
-            # pure perl
+              $SIG{$signal} ||= sub {
+                 local $!;
+                 syswrite $SIGPIPE_W, "\x00", 1 unless %SIG_EV;
+                 undef $SIG_EV{$signal};
+              };
 
-            # AE::Util has been loaded in signal
-            $signal = sig2name $signal;
-            $SIG_CB{$signal}{$arg{cb}} = $arg{cb};
+              # can't do signal processing without introducing races in pure perl,
+              # so limit the signal latency.
+              _sig_add;
 
-            $SIG{$signal} ||= sub {
-               local $!;
-               syswrite $SIGPIPE_W, "\x00", 1 unless %SIG_EV;
-               undef $SIG_EV{$signal};
-            };
-
-            # can't do signal processing without introducing races in pure perl,
-            # so limit the signal latency.
-            _sig_add;
-         }
-
-         bless [$signal, $arg{cb}], "AnyEvent::Base::signal"
-      };
+              bless [$signal, $arg{cb}], "AnyEvent::Base::signal"
+           }
+      ;
 
       *AnyEvent::Base::signal::DESTROY = sub {
          my ($signal, $cb) = @{$_[0]};
@@ -2059,7 +2083,7 @@ The actual code goes further and collects all errors (C<die>s, exceptions)
 that occurred during request processing. The C<result> method detects
 whether an exception as thrown (it is stored inside the $txn object)
 and just throws the exception, which means connection errors and other
-problems get reported tot he code that tries to use the result, not in a
+problems get reported to the code that tries to use the result, not in a
 random callback.
 
 All of this enables the following usage styles:
@@ -2526,6 +2550,9 @@ can take avdantage of advanced kernel interfaces such as C<epoll> and
 C<kqueue>, and is the fastest backend I<by far>. You can even embed
 L<Glib>/L<Gtk2> in it (or vice versa, see L<EV::Glib> and L<Glib::EV>).
 
+If you only use backends that rely on another event loop (e.g. C<Tk>),
+then this module will do nothing for you.
+
 =item L<Guard>
 
 The guard module, when used, will be used to implement
@@ -2536,11 +2563,8 @@ purely used for performance.
 =item L<JSON> and L<JSON::XS>
 
 One of these modules is required when you want to read or write JSON data
-via L<AnyEvent::Handle>. It is also written in pure-perl, but can take
+via L<AnyEvent::Handle>. L<JSON> is also written in pure-perl, but can take
 advantage of the ultra-high-speed L<JSON::XS> module when it is installed.
-
-In fact, L<AnyEvent::Handle> will use L<JSON::XS> by default if it is
-installed.
 
 =item L<Net::SSLeay>
 

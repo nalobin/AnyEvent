@@ -168,6 +168,9 @@ _update_clock;
 sub now        { $NOW          }
 sub now_update { _update_clock }
 
+*AE::now        = sub () { $NOW };
+*AE::now_update = sub () { _update_clock };
+
 # fds[0] is for read, fds[1] is for write watchers
 # fds[poll][V] is the bitmask for select
 # fds[poll][W][fd] contains a list of i/o watchers
@@ -217,7 +220,7 @@ sub one_event {
 
       _update_clock;
 
-      if ($fds) {
+      if ($fds > 0) {
          # buggy microshit windows errornously sets exceptfds instead of writefds
          $vec[1] |= $vec[2] if AnyEvent::WIN32;
 
@@ -236,10 +239,10 @@ sub one_event {
                }
             }
          }
-      } elsif (AnyEvent::WIN32 && $! == AnyEvent::Util::WSAEINVAL) {
+      } elsif (AnyEvent::WIN32 && $fds && $! == AnyEvent::Util::WSAEINVAL) {
          # buggy microshit windoze asks us to route around it
          CORE::select undef, undef, undef, $wait if $wait;
-      } elsif (!@timer || $timer[0][0] > $MNOW) {
+      } elsif (!@timer || $timer[0][0] > $MNOW && !$fds) {
          $$$_ && $$$_->() for @idle = grep $$$_, @idle;
       }
    }

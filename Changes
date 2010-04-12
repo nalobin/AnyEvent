@@ -1,9 +1,23 @@
 Revision history for Perl extension AnyEvent.
 
+5.26  Mon Apr 12 04:49:35 CEST 2010
+	- don't generate spurious readyness notifications when select
+          returns EINTR in the pure perl backend (analysed and testcase
+          by Bas Denissen).
+        - give same examples in SYNOPSIS sections of AnyEvent and AE.
+        - provider faster implementations for AE::time/now/now_update for
+          EV and Perl backends.
+        - provide faster AE::cv and AE::time implementations for all
+          backends.
+        - no longer support lower/mixed-case signal names (this was
+          never documented nor universally supported).
+        - some more memory µ-optimisations, and somewhat less messy
+          code to cope with both AnyEvent and AE APIs.
+
 5.251 Sat Mar 13 00:58:21 CET 2010
-	- make test failed if it was run before make install, and
-          older versions of perl make our live very difficult, so
-          write constants.pl during Makefile.PL time.
+        - make test failed if it was run before make install on perl <=
+          5.8.8, and older versions of perl make our live very difficult,
+          so write constants.pl during Makefile.PL time.
 
 5.25  Sat Mar 13 00:23:14 CET 2010
 	- fix a race condition in AnyEvent::Handle that would cause
@@ -21,7 +35,7 @@ Revision history for Perl extension AnyEvent.
           detection and eval.
         - free detection code after detection and similar memory optimisations.
         - Perl backend timer interval best effort drift has been improved
-          (ame algorithm as EV).
+          (same algorithm as EV).
         - update unicode idna mapping table.
 
 5.24  Tue Jan  5 11:39:43 CET 2010
@@ -408,7 +422,7 @@ Revision history for Perl extension AnyEvent.
           unless one has been installed already.
         - warn about not loaidng AnyEvent::Impl::POE early enough
           (patch by Adam Rosenstein).
-	- fixed a great number of bugs and corner cases in AnyEvent::Handle:
+	- fixed a great number of bugs and corner cases in AnyEvent::Handle.
         - fix a bug in where in SSL connect mode, the
           client would first wait for some data by the server and
           otherwise hang. (reported and analysed in an absolutely
