@@ -9,7 +9,7 @@ and POE are various supported event loops/environments.
 
    use AnyEvent;
 
-   # if you prefer function calls, look at the L<AE> manpage for
+   # if you prefer function calls, look at the AE manpage for
    # an alternative API.
 
    # file handle or descriptor readable
@@ -558,8 +558,8 @@ will actively watch for new events and call your callbacks.
 AnyEvent is slightly different: it expects somebody else to run the event
 loop and will only block when necessary (usually when told by the user).
 
-The instrument to do that is called a "condition variable", so called
-because they represent a condition that must become true.
+The tool to do that is called a "condition variable", so called because
+they represent a condition that must become true.
 
 Now is probably a good time to look at the examples further below.
 
@@ -574,13 +574,29 @@ by calling the C<send> method (or calling the condition variable as if it
 were a callback, read about the caveats in the description for the C<<
 ->send >> method).
 
-Condition variables are similar to callbacks, except that you can
-optionally wait for them. They can also be called merge points - points
-in time where multiple outstanding events have been processed. And yet
-another way to call them is transactions - each condition variable can be
-used to represent a transaction, which finishes at some point and delivers
-a result. And yet some people know them as "futures" - a promise to
-compute/deliver something that you can wait for.
+Since condition variables are the most complex part of the AnyEvent API, here are
+some different mental models of what they are - pick the ones you can connect to:
+
+=over 4
+
+=item * Condition variables are like callbacks - you can call them (and pass them instead
+of callbacks). Unlike callbacks however, you can also wait for them to be called.
+
+=item * Condition variables are signals - one side can emit or send them,
+the other side can wait for them, or install a handler that is called when
+the signal fires.
+
+=item * Condition variables are like "Merge Points" - points in your program
+where you merge multiple independent results/control flows into one.
+
+=item * Condition variables represent a transaction - function that start
+some kind of transaction can return them, leaving the caller the choice
+between waiting in a blocking fashion, or setting a callback.
+
+=item * Condition variables represent future values, or promises to deliver
+some result, long before the result is available.
+
+=back
 
 Condition variables are very useful to signal that something has finished,
 for example, if you write a module that does asynchronous http requests,
@@ -1059,7 +1075,7 @@ exit cleanly.
 The following is a non-exhaustive list of additional modules that use
 AnyEvent as a client and can therefore be mixed easily with other AnyEvent
 modules and other event loops in the same program. Some of the modules
-come with AnyEvent, most are available via CPAN.
+come as part of AnyEvent, the others are available via CPAN.
 
 =over 4
 
@@ -1084,60 +1100,48 @@ non-blocking SSL/TLS (via L<AnyEvent::TLS>.
 
 Provides rich asynchronous DNS resolver capabilities.
 
-=item L<AnyEvent::HTTP>
+=item L<AnyEvent::HTTP>, L<AnyEvent::IRC>, L<AnyEvent::XMPP>, L<AnyEvent::GPSD>, L<AnyEvent::IGS>, L<AnyEvent::FCP>
 
-A simple-to-use HTTP library that is capable of making a lot of concurrent
-HTTP requests.
+Implement event-based interfaces to the protocols of the same name (for
+the curious, IGS is the International Go Server and FCP is the Freenet
+Client Protocol).
+
+=item L<AnyEvent::Handle::UDP>
+
+Here be danger!
+
+As Pauli would put it, "Not only is it not right, it's not even wrong!" -
+there are so many things wrong with AnyEvent::Handle::UDP, most notably
+it's use of a stream-based API with a protocol that isn't streamable, that
+the only way to improve it is to delete it.
+
+It features data corruption (but typically only under load) and general
+confusion. On top, the author is not only clueless about UDP but also
+fact-resistant - some gems of his understanding: "connect doesn't work
+with UDP", "UDP packets are not IP packets", "UDP only has datagrams, not
+packets", "I don't need to implement proper error checking as UDP doesn't
+support error checking" and so on - he doesn't even understand what's
+wrong with his module when it is explained to him.
+
+=item L<AnyEvent::DBI>
+
+Executes L<DBI> requests asynchronously in a proxy process for you,
+notifying you in an event-bnased way when the operation is finished.
+
+=item L<AnyEvent::AIO>
+
+Truly asynchronous (as opposed to non-blocking) I/O, should be in the
+toolbox of every event programmer. AnyEvent::AIO transparently fuses
+L<IO::AIO> and AnyEvent together, giving AnyEvent access to event-based
+file I/O, and much more.
 
 =item L<AnyEvent::HTTPD>
 
-Provides a simple web application server framework.
+A simple embedded webserver.
 
 =item L<AnyEvent::FastPing>
 
 The fastest ping in the west.
-
-=item L<AnyEvent::DBI>
-
-Executes L<DBI> requests asynchronously in a proxy process.
-
-=item L<AnyEvent::AIO>
-
-Truly asynchronous I/O, should be in the toolbox of every event
-programmer. AnyEvent::AIO transparently fuses L<IO::AIO> and AnyEvent
-together.
-
-=item L<AnyEvent::BDB>
-
-Truly asynchronous Berkeley DB access. AnyEvent::BDB transparently fuses
-L<BDB> and AnyEvent together.
-
-=item L<AnyEvent::GPSD>
-
-A non-blocking interface to gpsd, a daemon delivering GPS information.
-
-=item L<AnyEvent::IRC>
-
-AnyEvent based IRC client module family (replacing the older Net::IRC3).
-
-=item L<AnyEvent::XMPP>
-
-AnyEvent based XMPP (Jabber protocol) module family (replacing the older
-Net::XMPP2>.
-
-=item L<AnyEvent::IGS>
-
-A non-blocking interface to the Internet Go Server protocol (used by
-L<App::IGS>).
-
-=item L<Net::FCP>
-
-AnyEvent-based implementation of the Freenet Client Protocol, birthplace
-of AnyEvent.
-
-=item L<Event::ExecFlow>
-
-High level API for event-based execution flow control.
 
 =item L<Coro>
 
@@ -1161,7 +1165,7 @@ BEGIN { AnyEvent::common_sense }
 
 use Carp ();
 
-our $VERSION = '5.261';
+our $VERSION = '5.27';
 our $MODEL;
 
 our $AUTOLOAD;
