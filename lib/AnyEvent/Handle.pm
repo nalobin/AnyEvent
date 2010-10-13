@@ -32,14 +32,14 @@ AnyEvent::Handle - non-blocking I/O on streaming handles via AnyEvent
 
 =head1 DESCRIPTION
 
-This module is a helper module to make it easier to do event-based I/O on
-stream-based filehandles (sockets, pipes or other stream things).
+This is a helper module to make it easier to do event-based I/O on
+stream-based filehandles (sockets, pipes, and other stream things).
 
 The L<AnyEvent::Intro> tutorial contains some well-documented
 AnyEvent::Handle examples.
 
-In the following, when the documentation refers to of "bytes" then this
-means characters. As sysread and syswrite are used for all I/O, their
+In the following, where the documentation refers to "bytes", it means
+characters. As sysread and syswrite are used for all I/O, their
 treatment of characters applies to this module as well.
 
 At the very minimum, you should specify C<fh> or C<connect>, and the
@@ -120,24 +120,23 @@ prepare the file handle with parameters required for the actual connect
 established).
 
 The return value of this callback should be the connect timeout value in
-seconds (or C<0>, or C<undef>, or the empty list, to indicate the default
-timeout is to be used).
+seconds (or C<0>, or C<undef>, or the empty list, to indicate that the
+default timeout is to be used).
 
 =item on_connect => $cb->($handle, $host, $port, $retry->())
 
 This callback is called when a connection has been successfully established.
 
-The actual numeric host and port (the socket peername) are passed as
+The peer's numeric host and port (the socket peername) are passed as
 parameters, together with a retry callback.
 
-When, for some reason, the handle is not acceptable, then calling
-C<$retry> will continue with the next connection target (in case of
-multi-homed hosts or SRV records there can be multiple connection
-endpoints). At the time it is called the read and write queues, eof
-status, tls status and similar properties of the handle will have been
-reset.
+If, for some reason, the handle is not acceptable, calling C<$retry>
+will continue with the next connection target (in case of multi-homed
+hosts or SRV records there can be multiple connection endpoints). At the
+time it is called the read and write queues, eof status, tls status and
+similar properties of the handle will have been reset.
 
-In most cases, ignoring the C<$retry> parameter is the way to go.
+In most cases, you should ignore the C<$retry> parameter.
 
 =item on_connect_error => $cb->($handle, $message)
 
@@ -154,14 +153,14 @@ fatal error instead.
 
 This is the error callback, which is called when, well, some error
 occured, such as not being able to resolve the hostname, failure to
-connect or a read error.
+connect, or a read error.
 
 Some errors are fatal (which is indicated by C<$fatal> being true). On
 fatal errors the handle object will be destroyed (by a call to C<< ->
 destroy >>) after invoking the error callback (which means you are free to
 examine the handle object). Examples of fatal errors are an EOF condition
 with active (but unsatisifable) read watchers (C<EPIPE>) or I/O errors. In
-cases where the other side can close the connection at their will it is
+cases where the other side can close the connection at will, it is
 often easiest to not report C<EPIPE> errors in this callback.
 
 AnyEvent::Handle tries to find an appropriate error code for you to check
@@ -169,17 +168,17 @@ against, but in some cases (TLS errors), this does not work well. It is
 recommended to always output the C<$message> argument in human-readable
 error messages (it's usually the same as C<"$!">).
 
-Non-fatal errors can be retried by simply returning, but it is recommended
+Non-fatal errors can be retried by returning, but it is recommended
 to simply ignore this parameter and instead abondon the handle object
 when this callback is invoked. Examples of non-fatal errors are timeouts
 C<ETIMEDOUT>) or badly-formatted data (C<EBADMSG>).
 
-On callback entrance, the value of C<$!> contains the operating system
-error code (or C<ENOSPC>, C<EPIPE>, C<ETIMEDOUT>, C<EBADMSG> or
+On entry to the callback, the value of C<$!> contains the operating
+system error code (or C<ENOSPC>, C<EPIPE>, C<ETIMEDOUT>, C<EBADMSG> or
 C<EPROTO>).
 
 While not mandatory, it is I<highly> recommended to set this callback, as
-you will not be notified of errors otherwise. The default simply calls
+you will not be notified of errors otherwise. The default just calls
 C<croak>.
 
 =item on_read => $cb->($handle)
@@ -194,7 +193,10 @@ method or access the C<< $handle->{rbuf} >> member directly. Note that you
 must not enlarge or modify the read buffer, you can only remove data at
 the beginning from it.
 
-When an EOF condition is detected then AnyEvent::Handle will first try to
+You can also call C<< ->push_read (...) >> or any other function that
+modifies the read queue. Or do both. Or ...
+
+When an EOF condition is detected, AnyEvent::Handle will first try to
 feed all the remaining data to the queued callbacks and C<on_read> before
 calling the C<on_eof> callback. If no progress can be made, then a fatal
 error will be raised (with C<$!> set to C<EPIPE>).
@@ -223,7 +225,7 @@ set, then a fatal error will be raised with C<$!> set to <0>.
 =item on_drain => $cb->($handle)
 
 This sets the callback that is called when the write buffer becomes empty
-(or when the callback is set and the buffer is empty already).
+(or immediately if the buffer is empty already).
 
 To append to the write buffer, use the C<< ->push_write >> method.
 
@@ -245,15 +247,15 @@ file handle (or a call to C<timeout_reset>), the C<on_timeout> callback
 will be invoked (and if that one is missing, a non-fatal C<ETIMEDOUT>
 error will be raised).
 
-There are three variants of the timeouts that work fully independent
+There are three variants of the timeouts that work independently
 of each other, for both read and write, just read, and just write:
 C<timeout>, C<rtimeout> and C<wtimeout>, with corresponding callbacks
 C<on_timeout>, C<on_rtimeout> and C<on_wtimeout>, and reset functions
 C<timeout_reset>, C<rtimeout_reset>, and C<wtimeout_reset>.
 
-Note that timeout processing is also active when you currently do not have
+Note that timeout processing is active even when you do not have
 any outstanding read or write requests: If you plan to keep the connection
-idle then you should disable the timout temporarily or ignore the timeout
+idle then you should disable the timeout temporarily or ignore the timeout
 in the C<on_timeout> callback, in which case AnyEvent::Handle will simply
 restart the timeout.
 
@@ -279,14 +281,14 @@ isn't finished).
 
 =item autocork => <boolean>
 
-When disabled (the default), then C<push_write> will try to immediately
-write the data to the handle, if possible. This avoids having to register
+When disabled (the default), C<push_write> will try to immediately
+write the data to the handle if possible. This avoids having to register
 a write watcher and wait for the next event loop iteration, but can
 be inefficient if you write multiple small chunks (on the wire, this
 disadvantage is usually avoided by your kernel's nagle algorithm, see
 C<no_delay>, but this option can save costly syscalls).
 
-When enabled, then writes will always be queued till the next event loop
+When enabled, writes will always be queued till the next event loop
 iteration. This is efficient when you do many small writes per iteration,
 but less efficient when you do a single write only per iteration (or when
 the write buffer often is full). It also increases write latency.
@@ -300,8 +302,8 @@ the Nagle algorithm, and usually it is beneficial.
 In some situations you want as low a delay as possible, which can be
 accomplishd by setting this option to a true value.
 
-The default is your opertaing system's default behaviour (most likely
-enabled), this option explicitly enables or disables it, if possible.
+The default is your operating system's default behaviour (most likely
+enabled). This option explicitly enables or disables it, if possible.
 
 =item keepalive => <boolean>
 
@@ -309,7 +311,7 @@ Enables (default disable) the SO_KEEPALIVE option on the stream socket:
 normally, TCP connections have no time-out once established, so TCP
 connections, once established, can stay alive forever even when the other
 side has long gone. TCP keepalives are a cheap way to take down long-lived
-TCP connections whent he other side becomes unreachable. While the default
+TCP connections when the other side becomes unreachable. While the default
 is OS-dependent, TCP keepalives usually kick in after around two hours,
 and, if the other side doesn't reply, take down the TCP connection some 10
 to 15 minutes later.
@@ -337,14 +339,14 @@ from most attacks.
 
 =item read_size => <bytes>
 
-The default read block size (the amount of bytes this module will
+The default read block size (the number of bytes this module will
 try to read during each loop iteration, which affects memory
 requirements). Default: C<8192>.
 
 =item low_water_mark => <bytes>
 
-Sets the amount of bytes (default: C<0>) that make up an "empty" write
-buffer: If the write reaches this size or gets even samller it is
+Sets the number of bytes (default: C<0>) that make up an "empty" write
+buffer: If the buffer reaches this size or gets even samller it is
 considered empty.
 
 Sometimes it can be beneficial (for performance reasons) to add data to
@@ -354,7 +356,7 @@ is good in almost all cases.
 
 =item linger => <seconds>
 
-If non-zero (default: C<3600>), then the destructor of the
+If this is non-zero (default: C<3600>), the destructor of the
 AnyEvent::Handle object will check whether there is still outstanding
 write data and will install a watcher that will write this data to the
 socket. No errors will be reported (this mostly matches how the operating
@@ -371,7 +373,7 @@ A string used to identify the remote site - usually the DNS hostname
 
 Apart from being useful in error messages, this string is also used in TLS
 peername verification (see C<verify_peername> in L<AnyEvent::TLS>). This
-verification will be skipped when C<peername> is not specified or
+verification will be skipped when C<peername> is not specified or is
 C<undef>.
 
 =item tls => "accept" | "connect" | Net::SSLeay::SSL object
@@ -407,7 +409,7 @@ passing in the wrong integer will lead to certain crash. This most often
 happens when one uses a stylish C<< tls => 1 >> and is surprised about the
 segmentation fault.
 
-See the C<< ->starttls >> method for when need to start TLS negotiation later.
+Use the C<< ->starttls >> method if you need to start TLS negotiation later.
 
 =item tls_ctx => $anyevent_tls
 
@@ -432,9 +434,9 @@ TLS handshake failures will not cause C<on_error> to be invoked when this
 callback is in effect, instead, the error message will be passed to C<on_starttls>.
 
 Without this callback, handshake failures lead to C<on_error> being
-called, as normal.
+called as usual.
 
-Note that you cannot call C<starttls> right again in this callback. If you
+Note that you cannot just call C<starttls> again in this callback. If you
 need to do that, start an zero-second timer instead whose callback can
 then call C<< ->starttls >> again.
 
@@ -558,7 +560,7 @@ sub _start {
    $self->starttls  (delete $self->{tls}, delete $self->{tls_ctx})
       if $self->{tls};
 
-   $self->on_drain  (delete $self->{on_drain}) if $self->{on_drain};
+   $self->on_drain  (delete $self->{on_drain} ) if $self->{on_drain};
 
    $self->start_read
       if $self->{on_read} || @{ $self->{_queue} };
@@ -644,11 +646,8 @@ the same name for details).
 sub no_delay {
    $_[0]{no_delay} = $_[1];
 
-   eval {
-      local $SIG{__DIE__};
-      setsockopt $_[0]{fh}, Socket::IPPROTO_TCP (), Socket::TCP_NODELAY (), int $_[1]
-         if $_[0]{fh};
-   };
+   setsockopt $_[0]{fh}, Socket::IPPROTO_TCP (), Socket::TCP_NODELAY (), int $_[1]
+      if $_[0]{fh};
 }
 
 =item $handle->keepalive ($boolean)
@@ -767,6 +766,9 @@ for my $dir ("", "r", "w") {
 
    *$timeout = sub {
       my ($self, $new_value) = @_;
+
+      $new_value >= 0
+         or Carp::croak "AnyEvent::Handle->$timeout called with negative timeout ($new_value), caught";
 
       $self->{$timeout} = $new_value;
       delete $self->{$tw}; &$cb;
@@ -935,7 +937,7 @@ Instead of formatting your data yourself, you can also let this module
 do the job by specifying a type and type-specific arguments. You
 can also specify the (fully qualified) name of a package, in which
 case AnyEvent tries to load the package and then expects to find the
-C<anyevent_read_type> function inside (see "custom write types", below).
+C<anyevent_write_type> function inside (see "custom write types", below).
 
 Predefined types are (if you have ideas for additional types, feel free to
 drop by and tell us):
@@ -1109,13 +1111,14 @@ a queue.
 
 In the simple case, you just install an C<on_read> callback and whenever
 new data arrives, it will be called. You can then remove some data (if
-enough is there) from the read buffer (C<< $handle->rbuf >>). Or you cna
+enough is there) from the read buffer (C<< $handle->rbuf >>). Or you can
 leave the data there if you want to accumulate more (e.g. when only a
-partial message has been received so far).
+partial message has been received so far), or change the read queue with
+e.g. C<push_read>.
 
 In the more complex case, you want to queue multiple callbacks. In this
 case, AnyEvent::Handle will call the first queued callback each time new
-data arrives (also the first time it is queued) and removes it when it has
+data arrives (also the first time it is queued) and remove it when it has
 done its job (see C<push_read>, below).
 
 This way you can, for example, push three line-reads, followed by reading
@@ -1270,17 +1273,18 @@ sub on_read {
 
 =item $handle->rbuf
 
-Returns the read buffer (as a modifiable lvalue).
+Returns the read buffer (as a modifiable lvalue). You can also access the
+read buffer directly as the C<< ->{rbuf} >> member, if you want (this is
+much faster, and no less clean).
 
-You can access the read buffer directly as the C<< ->{rbuf} >>
-member, if you want. However, the only operation allowed on the
-read buffer (apart from looking at it) is removing data from its
-beginning. Otherwise modifying or appending to it is not allowed and will
-lead to hard-to-track-down bugs.
+The only operation allowed on the read buffer (apart from looking at it)
+is removing data from its beginning. Otherwise modifying or appending to
+it is not allowed and will lead to hard-to-track-down bugs.
 
-NOTE: The read buffer should only be used or modified if the C<on_read>,
-C<push_read> or C<unshift_read> methods are used. The other read methods
-automatically manage the read buffer.
+NOTE: The read buffer should only be used or modified in the C<on_read>
+callback or when C<push_read> or C<unshift_read> are used with a single
+callback (i.e. untyped). Typed C<push_read> and C<unshift_read> methods
+will manage the read buffer on their own.
 
 =cut
 
@@ -1341,7 +1345,8 @@ sub unshift_read {
    if (@_) {
       my $type = shift;
 
-      $cb = ($RH{$type} or Carp::croak "unsupported type passed to AnyEvent::Handle::unshift_read")
+      $cb = ($RH{$type} ||= _load_func "$type\::anyevent_read_type"
+             or Carp::croak "unsupported/unloadable type '$type' passed to AnyEvent::Handle::unshift_read")
             ->($self, $cb, @_);
    }
 
@@ -1459,10 +1464,10 @@ and everything preceding and including the match will be accepted
 unconditionally. This is useful to skip large amounts of data that you
 know cannot be matched, so that the C<$accept> or C<$reject> regex do not
 have to start matching from the beginning. This is purely an optimisation
-and is usually worth only when you expect more than a few kilobytes.
+and is usually worth it only when you expect more than a few kilobytes.
 
 Example: expect a http header, which ends at C<\015\012\015\012>. Since we
-expect the header to be very large (it isn't in practise, but...), we use
+expect the header to be very large (it isn't in practice, but...), we use
 a skip regex to skip initial portions. The skip regex is tricky in that
 it only accepts something not ending in either \015 or \012, as these are
 required for the accept regex.
@@ -1872,8 +1877,8 @@ changed to your liking. Note that the handshake might have already started
 when this function returns.
 
 Due to bugs in OpenSSL, it might or might not be possible to do multiple
-handshakes on the same stream. Best do not attempt to use the stream after
-stopping TLS.
+handshakes on the same stream. It is best to not attempt to use the
+stream after stopping TLS.
 
 This method may invoke callbacks (and therefore the handle might be
 destroyed after it returns).
@@ -2113,11 +2118,11 @@ from within all other callbacks, you need to explicitly call the C<<
 reading?
 
 Unlike, say, TCP, TLS connections do not consist of two independent
-communication channels, one for each direction. Or put differently. The
+communication channels, one for each direction. Or put differently, the
 read and write directions are not independent of each other: you cannot
 write data unless you are also prepared to read, and vice versa.
 
-This can mean than, in TLS mode, you might get C<on_error> or C<on_eof>
+This means that, in TLS mode, you might get C<on_error> or C<on_eof>
 callback invocations when you are not expecting any read data - the reason
 is that AnyEvent::Handle always reads in TLS mode.
 
@@ -2141,7 +2146,7 @@ will be in C<$_[0]{rbuf}>:
 
 The reason to use C<on_error> is that TCP connections, due to latencies
 and packets loss, might get closed quite violently with an error, when in
-fact, all data has been received.
+fact all data has been received.
 
 It is usually better to use acknowledgements when transferring data,
 to make sure the other side hasn't just died and you got the data
@@ -2168,7 +2173,7 @@ consider using C<< ->push_shutdown >> instead.
 =item I want to contact a TLS/SSL server, I don't care about security.
 
 If your TLS server is a pure TLS server (e.g. HTTPS) that only speaks TLS,
-simply connect to it and then create the AnyEvent::Handle with the C<tls>
+connect to it and then create the AnyEvent::Handle with the C<tls>
 parameter:
 
    tcp_connect $host, $port, sub {
@@ -2278,7 +2283,7 @@ for use for subclasses.
 are free to use in subclasses.
 
 Of course, new versions of AnyEvent::Handle may introduce more "public"
-member variables, but thats just life, at least it is documented.
+member variables, but that's just life. At least it is documented.
 
 =back
 

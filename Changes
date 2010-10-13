@@ -1,5 +1,30 @@
 Revision history for Perl extension AnyEvent.
 
+TODO: document TCP_*** constants
+TODO: catch AE::xxx for anyevent struct and anyevent debug
+TODO: anyevent::trace? or debug tracing all watchers?
+
+5.28   Wed Oct 13 04:14:23 CEST 2010
+        - due to a glitch, AnyEvent's internal getprotobyname wasn't
+          actually used in tcp_server.
+        - implement AnyEvent::CondVar->new method, which was documented but
+          missing.
+        - support autoloading of read types in unshift_read.
+        - AnyEvent::Strict: do the test for invalid fh arguments differently,
+          resulting in more informative error messages.
+        - new AnyEvent::FAQ manpage.
+	- clarify that you can actually call push_read etc. in on_read.
+        - put keys and certs in /tmp, not into the current directory,
+          and document this in the SECURITY CONSIDERATIONS sections
+          of AnyEvent::TLS.
+        - support ";" as resolv.conf comment character in AnyEvent::DNS, as
+          requested by Ron Isaacson.
+        - document $AnyEvent::DNS::RESOLVER variable.
+        - incorporated major typo patches by Abhijit Menon-Sen.
+        - AnyEvent::Handle now croaks when negative timeouts are passed.
+        - add a shitload of TCP_xxx sockopt name constants to AnyEvent::Util,
+          undocumented, but who knows when they might come in handy.
+
 5.271  Tue Jun  8 12:05:46 CEST 2010
 	- backport to perl 5.8.x.
 

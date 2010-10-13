@@ -655,7 +655,7 @@ sub resolve_sockaddr($$$$$$) {
    $proto ||= "tcp";
    $type  ||= $proto eq "udp" ? SOCK_DGRAM : SOCK_STREAM;
 
-   my $proton = getprotobyname $proto
+   my $proton = AnyEvent::Socket::getprotobyname $proto
       or Carp::croak "$proto: protocol unknown";
 
    my $port;
@@ -1110,6 +1110,35 @@ sub tcp_server($$$;$) {
    defined wantarray
       ? guard { %state = () } # clear fh and watcher, which breaks the circular dependency
       : ()
+}
+
+=item tcp_nodelay $fh, $enable
+
+Enables (or disables) the C<TCP_NODELAY> socket option (also known as
+Nagle's algorithm). Returns false on error, true otherwise.
+
+=cut
+
+sub tcp_nodelay($$) {
+   my $onoff = int ! ! $_[1];
+
+   setsockopt $_[0], Socket::IPPROTO_TCP (), Socket::TCP_NODELAY (), $onoff
+}
+
+=item tcp_congestion $fh, $algorithm
+
+Sets the tcp congestion avoidance algorithm (via the C<TCP_CONGESTION>
+socket option). The default is OS-specific, but is usually
+C<reno>. Typical other available choices include C<cubic>, C<lp>, C<bic>,
+C<highspeed>, C<htcp>, C<hybla>, C<illinois>, C<scalable>, C<vegas>,
+C<veno>, C<westwood> and C<yeah>.
+
+=cut
+
+sub tcp_congestion($$) {
+   defined TCP_CONGESTION
+      ? setsockopt $_[0], Socket::IPPROTO_TCP (), TCP_CONGESTION, "$_[1]"
+      : undef
 }
 
 1;

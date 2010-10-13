@@ -8,6 +8,7 @@ constants.pl.PL
 lib/AE.pm
 lib/AnyEvent.pm
 lib/AnyEvent/Intro.pod
+lib/AnyEvent/FAQ.pod
 lib/AnyEvent/Strict.pm
 lib/AnyEvent/Debug.pm
 lib/AnyEvent/DNS.pm
@@ -54,3 +55,4 @@ eg/ae2.pl
 
 util/gen_uts46data
 META.yml                                 Module meta-data (added by MakeMaker)
+META.json                                Module meta-data (added by MakeMaker)
