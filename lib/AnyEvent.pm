@@ -1169,7 +1169,7 @@ BEGIN { AnyEvent::common_sense }
 
 use Carp ();
 
-our $VERSION = '5.28';
+our $VERSION = '5.29';
 our $MODEL;
 
 our $AUTOLOAD;
@@ -1293,7 +1293,7 @@ sub detect() {
          }
 
          $MODEL
-           or die "No event module selected for AnyEvent and autodetect failed. Install any one of these modules: EV, Event or Glib.\n";
+           or die "AnyEvent: backend autodetection failed - did you properly install AnyEvent?\n";
       }
    }
 
@@ -1302,14 +1302,18 @@ sub detect() {
    push @{"$MODEL\::ISA"}, "AnyEvent::Base";
    unshift @ISA, $MODEL;
 
-   # now nuke some methods that are overriden by the backend.
+   # now nuke some methods that are overridden by the backend.
    # SUPER is not allowed.
    for (qw(time signal child idle)) {
       undef &{"AnyEvent::Base::$_"}
          if defined &{"$MODEL\::$_"};
    }
 
-   require AnyEvent::Strict if $ENV{PERL_ANYEVENT_STRICT};
+   if ($ENV{PERL_ANYEVENT_STRICT}) {
+      eval { require AnyEvent::Strict };
+      warn "AnyEvent: cannot load AnyEvent::Strict: $@"
+         if $@ && $VERBOSE;
+   }
 
    (shift @post_detect)->() while @post_detect;
 
@@ -1626,7 +1630,6 @@ sub signal {
 our %PID_CB;
 our $CHLD_W;
 our $CHLD_DELAY_W;
-our $WNOHANG;
 
 # used by many Impl's
 sub _emit_childstatus($$) {
@@ -1643,7 +1646,7 @@ sub child {
          my $pid;
 
          AnyEvent->_emit_childstatus ($pid, $?)
-            while ($pid = waitpid -1, $WNOHANG) > 0;
+            while ($pid = waitpid -1, WNOHANG) > 0;
       };
 
       *child = sub {
@@ -1653,11 +1656,6 @@ sub child {
             or Carp::croak "required option 'pid' is missing";
 
          $PID_CB{$pid}{$arg{cb}} = $arg{cb};
-
-         # WNOHANG is almost cetrainly 1 everywhere
-         $WNOHANG ||= $^O =~ /^(?:openbsd|netbsd|linux|freebsd|cygwin|MSWin32)$/
-                      ? 1
-                      : eval { local $SIG{__DIE__}; require POSIX; &POSIX::WNOHANG } || 1;
 
          unless ($CHLD_W) {
             $CHLD_W = AE::signal CHLD => \&_sigchld;

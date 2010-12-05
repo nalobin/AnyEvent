@@ -22,7 +22,7 @@ print <<EOF;
 EOF
 
 do "constants.pl.PL"
-   or die "cannot execute constants.pl.PL";
+   or die "cannot execute constants.pl.PL: $@";
 
 WriteMakefile(
     dist	=> {
@@ -39,7 +39,7 @@ WriteMakefile(
            "Net::SSLeay"      => 1.33,
            "JSON"             => 2.09,
            "JSON::XS"         => 2.2,
-           "EV"               => 3.05,
+           "EV"               => 4.00,
            "Guard"            => 1.02,
            "Async::Interrupt" => 1.0,
         }
