@@ -87,12 +87,12 @@ module are I<also> forced to use the same event loop you use.
 
 AnyEvent is different: AnyEvent + POE works fine. AnyEvent + Glib works
 fine. AnyEvent + Tk works fine etc. etc. but none of these work together
-with the rest: POE + IO::Async? No go. Tk + Event? No go. Again: if
-your module uses one of those, every user of your module has to use it,
-too. But if your module uses AnyEvent, it works transparently with all
-event models it supports (including stuff like IO::Async, as long as those
-use one of the supported event loops. It is easy to add new event loops
-to AnyEvent, too, so it is future-proof).
+with the rest: POE + EV? No go. Tk + Event? No go. Again: if your module
+uses one of those, every user of your module has to use it, too. But if
+your module uses AnyEvent, it works transparently with all event models it
+supports (including stuff like IO::Async, as long as those use one of the
+supported event loops. It is easy to add new event loops to AnyEvent, too,
+so it is future-proof).
 
 In addition to being free of having to use I<the one and only true event
 model>, AnyEvent also is free of bloat and policy: with POE or similar
@@ -878,6 +878,8 @@ create watchers. Nothing special needs to be done by the main program.
    AnyEvent::Impl::EventLib  based on Event::Lib, leaks memory and worse.
    AnyEvent::Impl::POE       based on POE, very slow, some limitations.
    AnyEvent::Impl::Irssi     used when running within irssi.
+   AnyEvent::Impl::IOAsync   based on IO::Async.
+   AnyEvent::Impl::Cocoa     based on Cocoa::EventLoop.
 
 =item Backends with special needs.
 
@@ -887,14 +889,6 @@ instantiates the application before any AnyEvent watchers are created,
 everything should just work.
 
    AnyEvent::Impl::Qt        based on Qt.
-
-Support for IO::Async can only be partial, as it is too broken and
-architecturally limited to even support the AnyEvent API. It also
-is the only event loop that needs the loop to be set explicitly, so
-it can only be used by a main program knowing about AnyEvent. See
-L<AnyEvent::Impl::IOAsync> for the gory details.
-
-   AnyEvent::Impl::IOAsync   based on IO::Async, cannot be autoprobed.
 
 =item Event loops that are indirectly supported via other backends.
 
@@ -1169,7 +1163,7 @@ BEGIN { AnyEvent::common_sense }
 
 use Carp ();
 
-our $VERSION = '5.29';
+our $VERSION = '5.3';
 our $MODEL;
 
 our $AUTOLOAD;
@@ -1217,14 +1211,8 @@ my @models = (
    [POE::Kernel::          => AnyEvent::Impl::POE::],      # lasciate ogni speranza
    [Wx::                   => AnyEvent::Impl::POE::],
    [Prima::                => AnyEvent::Impl::POE::],
-   # IO::Async is just too broken - we would need workarounds for its
-   # byzantine signal and broken child handling, among others.
-   # IO::Async is rather hard to detect, as it doesn't have any
-   # obvious default class.
-   [IO::Async::               => AnyEvent::Impl::IOAsync::], # requires special main program
-   [IO::Async::Loop::         => AnyEvent::Impl::IOAsync::], # requires special main program
-   [IO::Async::Notifier::     => AnyEvent::Impl::IOAsync::], # requires special main program
-   [AnyEvent::Impl::IOAsync:: => AnyEvent::Impl::IOAsync::], # requires special main program
+   [IO::Async::Loop::      => AnyEvent::Impl::IOAsync::],
+   [Cocoa::EventLoop::     => AnyEvent::Impl::Cocoa::],
 );
 
 our %method = map +($_ => 1),

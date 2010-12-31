@@ -513,12 +513,13 @@ Like "<", but redirects the specified file descriptor instead.
 
 =item on_prepare => $cb
 
-Specify a callback that is executed just before the comamnd is C<exec>'ed,
+Specify a callback that is executed just before the command is C<exec>'ed,
 in the child process. Be careful not to use any event handling or other
 services not available in the child.
 
 This can be useful to set up the environment in special ways, such as
-changing the priority of the command.
+changing the priority of the command or manipulating signal handlers (e.g.
+setting C<SIGINT> to C<IGNORE>).
 
 =item close_all => $boolean
 
@@ -594,6 +595,8 @@ sub run_cmd {
          } elsif (ref $ob) {
             my ($pr, $pw) = AnyEvent::Util::portable_pipe;
             $cv->begin;
+
+            fcntl $pr, AnyEvent::F_SETFD, AnyEvent::FD_CLOEXEC;
             my $w; $w = AE::io $pr, 0,
                "SCALAR" eq ref $ob
                   ? sub {
@@ -635,6 +638,7 @@ sub run_cmd {
                $data = $ob->();
             }
 
+            fcntl $pw, AnyEvent::F_SETFD, AnyEvent::FD_CLOEXEC;
             my $w; $w = AE::io $pw, 1, sub {
                my $len = syswrite $pw, $data;
 

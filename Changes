@@ -5,6 +5,19 @@ TODO: catch AE::xxx for anyevent strict and anyevent debug
 TODO: anyevent::trace? or debug tracing all watchers?
 TODO: anyevent strict checking for $_ changes?
 
+5.3    Fri Dec 31 05:48:13 CET 2010
+	- major IOAsync patch by Paul Evans - 0.33 is required, as the major
+          issues with IO::Async have been solved in that version, including
+          the availabilty of a default loop!
+	- implement new wbuf_max parameter for AnyEvent::Handle.
+        - added Cocoa::EventLoop backend by Daisuke Murase.
+        - the default testsuite now honors PERL_ANYEVENT_MODEL (Paul Evans).
+        - clarify handle on_prepare documentation.
+	- set CLOEXEC flag on parent-side fd's in AnyEvent::Util::run_cmd,
+          to avoid leaking them to any child processes.
+        - try to force files into the arch-dependend lib directory, for the
+          half-"turly obsessive compulsive person"(s) that depend on it.
+
 5.29   Sun Dec  5 10:49:21 CET 2010
         - convert EV backend to EV 4.00 API (so better upgrade EV too).
         - AE::Handle: implement dynamic read_size adjustment, add
