@@ -767,7 +767,7 @@ sub rbuf_max {
    $_[0]{rbuf_max} = $_[1];
 }
 
-sub rbuf_max {
+sub wbuf_max {
    $_[0]{wbuf_max} = $_[1];
 }
 
@@ -1089,7 +1089,7 @@ C<on_drain> handler by a callback that shuts down the socket (and set
 C<low_water_mark> to C<0>). This method is a shorthand for just that, and
 replaces the C<on_drain> callback with:
 
-   sub { shutdown $_[0]{fh}, 1 }    # for push_shutdown
+   sub { shutdown $_[0]{fh}, 1 }
 
 This simply shuts down the write side and signals an EOF condition to the
 the peer.
@@ -1775,15 +1775,24 @@ you change the C<on_read> callback or push/unshift a read callback, and it
 will automatically C<stop_read> for you when neither C<on_read> is set nor
 there are any read requests in the queue.
 
-These methods will have no effect when in TLS mode (as TLS doesn't support
-half-duplex connections).
+In older versions of this module (<= 5.3), these methods had no effect,
+as TLS does not support half-duplex connections. In current versions they
+work as expected, as this behaviour is required to avoid certain resource
+attacks, where the program would be forced to read (and buffer) arbitrary
+amounts of data before being able to send some data. The drawback is that
+some readings of the the SSL/TLS specifications basically require this
+attack to be working, as SSL/TLS implementations might stall sending data
+during a rehandshake.
+
+As a guideline, during the initial handshake, you should not stop reading,
+and as a client, it might cause problems, depending on your applciation.
 
 =cut
 
 sub stop_read {
    my ($self) = @_;
 
-   delete $self->{_rw} unless $self->{tls};
+   delete $self->{_rw};
 }
 
 sub start_read {
@@ -2042,6 +2051,19 @@ sub _freetls {
    
    delete @$self{qw(_rbio _wbio _tls_wbuf _on_starttls)};
 }
+
+=item $handle->resettls
+
+This rarely-used method simply resets and TLS state on the handle, usually
+causing data loss.
+
+One case where it may be useful is when you want to skip over the data in
+the stream but you are not interested in interpreting it, so data loss is
+no concern.
+
+=cut
+
+*resettls = \&_freetls;
 
 sub DESTROY {
    my ($self) = @_;

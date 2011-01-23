@@ -777,7 +777,7 @@ hosts or hosts with both IPv4 and IPv6 addresses) and try to connect to
 each in turn.
 
 After the connection is established, then the C<$connect_cb> will be
-invoked with the socket file handle (in non-blocking mode) as first and
+invoked with the socket file handle (in non-blocking mode) as first, and
 the peer host (as a textual IP address) and peer port as second and third
 arguments, respectively. The fourth argument is a code reference that you
 can call if, for some reason, you don't like this connection, which will
@@ -951,7 +951,7 @@ sub tcp_connect($$$;$) {
                      # cygwin 1.5 continously reports "ready' but never delivers
                      # an error with getpeername or sysread.
                      # cygwin 1.7 only reports readyness *once*, but is otherwise
-                     # the same, which is atcually more broken.
+                     # the same, which is actually more broken.
                      # Work around both by using unportable SO_ERROR for cygwin.
                      $! = (unpack "l", getsockopt $state{fh}, Socket::SOL_SOCKET(), Socket::SO_ERROR()) || Errno::EAGAIN
                         if AnyEvent::CYGWIN && $! == Errno::EAGAIN;
@@ -1001,7 +1001,7 @@ below.
 
 For each new connection that could be C<accept>ed, call the C<<
 $accept_cb->($fh, $host, $port) >> with the file handle (in non-blocking
-mode) as first and the peer host and port as second and third arguments
+mode) as first, and the peer host and port as second and third arguments
 (see C<tcp_connect> for details).
 
 Croaks on any errors it can detect before the listen.
@@ -1009,7 +1009,7 @@ Croaks on any errors it can detect before the listen.
 If called in non-void context, then this function returns a guard object
 whose lifetime it tied to the TCP server: If the object gets destroyed,
 the server will be stopped (but existing accepted connections will
-continue).
+not be affected).
 
 If you need more control over the listening socket, you can provide a
 C<< $prepare_cb->($fh, $host, $port) >>, which is called just before the
