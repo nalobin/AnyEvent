@@ -4,6 +4,28 @@ TODO: document TCP_*** constants
 TODO: catch AE::xxx for anyevent strict and anyevent debug
 TODO: anyevent::trace? or debug tracing all watchers?
 TODO: anyevent strict checking for $_ changes?
+TODO: break the API and put the rr ttl where it belongs.
+TODO: Kevin Ryde         (3.8K)   1 inbox       Glib child processes
+
+5.34  Thu May 12 09:59:41 CEST 2011
+	- AE::TLS didn't support both cert_file and key at the same time,
+          due to some copy&paste bug (reported and analyzed by vti).
+	- improve AE::Handle timeout documentation slightly.
+
+5.33  Mon Feb  7 21:51:41 CET 2011
+	- never appeared on CPAN, for unknown reasons.
+	- AnyEvent::Handle on_connect_error - do not try to destroy a handle
+          object when it's already gone (analyzed by Ryan Bullock).
+	- update idna algorithm(s) to UTS#46 version 6.0.0.
+        - preserve trailing dot in idn_to_ascii - testsuite says to preserve,
+          uts46 says it's an error, and testsuite makes more sense.
+        - remove leading dots in idn_to_ascii - testsuite says to remove,
+          uts46 says it's an error, and testsuite makes more sense.
+        - fixed a bug in idn ignored character processing.
+        - passes the uts46 6.0.0 testsuite except for three cases which
+          apparently are bugs in the testsuite itself.
+        - passes the uts46 6.0.1 testsuite except for eleven cases which
+          apparently are bugs in the testsuite itself.
 
 5.31  Sun Jan 23 11:49:19 CET 2011
 	- work around a POE bug where POE would first poll for new events and
@@ -11,7 +33,9 @@ TODO: anyevent strict checking for $_ changes?
 	- fix parsing of "domain" statement in resolv.conf (Johannes Plunien).
 	- stop_read now does just that in TLS mode. see its
           documentation for caveats.
-	- update to common::sense 3.4 warning set.
+	- update to common::sense 3.4 warning set (some warnings in perl impose
+          an arbitrary 32kb limit on regex matches, which affects
+          AnyEvent::Handle).
         - AE::Handle had a broken rbuf_max method and missing wbuf_max method.
         - new experimental AE::Handle::resettls method.
 

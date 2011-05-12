@@ -55,4 +55,5 @@ eg/ae0.pl
 eg/ae2.pl
 
 util/gen_uts46data
-META.yml                                 Module meta-data (added by MakeMaker)
+util/tst_uts46data
+META.json                                Module meta-data (added by MakeMaker)
