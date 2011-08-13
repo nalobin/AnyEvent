@@ -123,11 +123,11 @@ module.
 
 During the first call of any watcher-creation method, the module tries
 to detect the currently loaded event loop by probing whether one of the
-following modules is already loaded: L<EV>, L<AnyEvent::Impl::Perl>,
+following modules is already loaded: L<EV>, L<AnyEvent::Loop>,
 L<Event>, L<Glib>, L<Tk>, L<Event::Lib>, L<Qt>, L<POE>. The first one
 found is used. If none are detected, the module tries to load the first
 four modules in the order given; but note that if L<EV> is not
-available, the pure-perl L<AnyEvent::Impl::Perl> should always work, so
+available, the pure-perl L<AnyEvent::Loop> should always work, so
 the other two are not normally tried.
 
 Because AnyEvent first checks for modules that are already loaded, loading
@@ -144,9 +144,9 @@ starts using it, all bets are off - this case should be very rare though,
 as very few modules hardcode event loops without announcing this very
 loudly.
 
-The pure-perl implementation of AnyEvent is called
-C<AnyEvent::Impl::Perl>. Like other event modules you can load it
-explicitly and enjoy the high availability of that event loop :)
+The pure-perl implementation of AnyEvent is called C<AnyEvent::Loop>. Like
+other event modules you can load it explicitly and enjoy the high
+availability of that event loop :)
 
 =head1 WATCHERS
 
@@ -358,9 +358,9 @@ account.
 
 =item AnyEvent->now_update
 
-Some event loops (such as L<EV> or L<AnyEvent::Impl::Perl>) cache
-the current time for each loop iteration (see the discussion of L<<
-AnyEvent->now >>, above).
+Some event loops (such as L<EV> or L<AnyEvent::Loop>) cache the current
+time for each loop iteration (see the discussion of L<< AnyEvent->now >>,
+above).
 
 When a callback runs for a long time (or when the process sleeps), then
 this "current" time will differ substantially from the real time, which
@@ -484,8 +484,8 @@ watcher before you C<fork> the child (alternatively, you can call
 C<AnyEvent::detect>).
 
 As most event loops do not support waiting for child events, they will be
-emulated by AnyEvent in most cases, in which the latency and race problems
-mentioned in the description of signal watchers apply.
+emulated by AnyEvent in most cases, in which case the latency and race
+problems mentioned in the description of signal watchers apply.
 
 Example: fork a process and wait for it
 
@@ -862,7 +862,7 @@ pure-perl implementation, which is available everywhere as it comes with
 AnyEvent itself.
 
    AnyEvent::Impl::EV        based on EV (interface to libev, best choice).
-   AnyEvent::Impl::Perl      pure-perl implementation, fast and portable.
+   AnyEvent::Impl::Perl      pure-perl AnyEvent::Loop, fast and portable.
 
 =item Backends that are transparently being picked up when they are used.
 
@@ -880,6 +880,7 @@ create watchers. Nothing special needs to be done by the main program.
    AnyEvent::Impl::Irssi     used when running within irssi.
    AnyEvent::Impl::IOAsync   based on IO::Async.
    AnyEvent::Impl::Cocoa     based on Cocoa::EventLoop.
+   AnyEvent::Impl::FLTK2     based on FLTK (fltk 2 binding).
 
 =item Backends with special needs.
 
@@ -934,6 +935,10 @@ Returns C<$AnyEvent::MODEL>, forcing autodetection of the event model
 if necessary. You should only call this function right before you would
 have created an AnyEvent watcher anyway, that is, as late as possible at
 runtime, and not e.g. during initialisation of your module.
+
+The effect of calling this function is as if a watcher had been created
+(specifically, actions that happen "when the first watcher is created"
+happen when calling detetc as well).
 
 If you need to do some initialisation before AnyEvent watchers are
 created, use C<post_detect>.
@@ -1006,6 +1011,46 @@ Coro to accomplish this):
       push @AnyEvent::post_detect, sub { require Coro::AnyEvent };
    }
 
+=item AnyEvent::postpone { BLOCK }
+
+Arranges for the block to be executed as soon as possible, but not before
+the call itself returns. In practise, the block will be executed just
+before the event loop polls for new events, or shortly afterwards.
+
+This function never returns anything (to make the C<return postpone { ...
+}> idiom more useful.
+
+To understand the usefulness of this function, consider a function that
+asynchronously does something for you and returns some transaction
+object or guard to let you cancel the operation. For example,
+C<AnyEvent::Socket::tcp_connect>:
+
+   # start a conenction attempt unless one is active
+   $self->{connect_guard} ||= AnyEvent::Socket::tcp_connect "www.example.net", 80, sub {
+      delete $self->{connect_guard};
+      ...
+   };
+
+Imagine that this function could instantly call the callback, for
+example, because it detects an obvious error such as a negative port
+number. Invoking the callback before the function returns causes problems
+however: the callback will be called and will try to delete the guard
+object. But since the function hasn't returned yet, there is nothing to
+delete. When the function eventually returns it will assign the guard
+object to C<< $self->{connect_guard} >>, where it will likely never be
+deleted, so the program thinks it is still trying to connect.
+
+This is where C<AnyEvent::postpone> should be used. Instead of calling the
+callback directly on error:
+
+   $cb->(undef), return # signal error to callback, BAD!
+      if $some_error_condition;
+
+It should use C<postpone>:
+
+   AnyEvent::postpone { $cb->(undef) }, return # signal error to callback, later
+      if $some_error_condition;
+
 =back
 
 =head1 WHAT TO DO IN A MODULE
@@ -1048,7 +1093,7 @@ decide on the event model to use as soon as it creates watchers, and it
 might choose the wrong one unless you load the correct one yourself.
 
 You can chose to use a pure-perl implementation by loading the
-C<AnyEvent::Impl::Perl> module, which gives you similar behaviour
+C<AnyEvent::Loop> module, which gives you similar behaviour
 everywhere, but letting AnyEvent chose the model is generally better.
 
 =head2 MAINLOOP EMULATION
@@ -1163,10 +1208,9 @@ BEGIN { AnyEvent::common_sense }
 
 use Carp ();
 
-our $VERSION = '5.34';
+our $VERSION = '6.0';
 our $MODEL;
 
-our $AUTOLOAD;
 our @ISA;
 
 our @REGISTRY;
@@ -1196,28 +1240,6 @@ our %PROTOCOL; # (ipv4|ipv6) => (1|2), higher numbers are preferred
              $ENV{PERL_ANYEVENT_PROTOCOLS} || "ipv4,ipv6";
 }
 
-my @models = (
-   [EV::                   => AnyEvent::Impl::EV::   , 1],
-   [AnyEvent::Impl::Perl:: => AnyEvent::Impl::Perl:: , 1],
-   # everything below here will not (normally) be autoprobed
-   # as the pureperl backend should work everywhere
-   # and is usually faster
-   [Event::                => AnyEvent::Impl::Event::, 1],
-   [Glib::                 => AnyEvent::Impl::Glib:: , 1], # becomes extremely slow with many watchers
-   [Event::Lib::           => AnyEvent::Impl::EventLib::], # too buggy
-   [Irssi::                => AnyEvent::Impl::Irssi::],    # Irssi has a bogus "Event" package
-   [Tk::                   => AnyEvent::Impl::Tk::],       # crashes with many handles
-   [Qt::                   => AnyEvent::Impl::Qt::],       # requires special main program
-   [POE::Kernel::          => AnyEvent::Impl::POE::],      # lasciate ogni speranza
-   [Wx::                   => AnyEvent::Impl::POE::],
-   [Prima::                => AnyEvent::Impl::POE::],
-   [IO::Async::Loop::      => AnyEvent::Impl::IOAsync::],
-   [Cocoa::EventLoop::     => AnyEvent::Impl::Cocoa::],
-);
-
-our %method = map +($_ => 1),
-   qw(io timer time now now_update signal child idle condvar one_event DESTROY);
-
 our @post_detect;
 
 sub post_detect(&) {
@@ -1234,15 +1256,65 @@ sub AnyEvent::Util::postdetect::DESTROY {
    @post_detect = grep $_ != ${$_[0]}, @post_detect;
 }
 
+our $POSTPONE_W;
+our @POSTPONE;
+
+sub _postpone_exec {
+   undef $POSTPONE_W;
+
+   &{ shift @POSTPONE }
+      while @POSTPONE;
+}
+
+sub postpone(&) {
+   push @POSTPONE, shift;
+
+   $POSTPONE_W ||= AE::timer (0, 0, \&_postpone_exec);
+
+   ()
+}
+
+our @models = (
+   [EV::                   => AnyEvent::Impl::EV::   , 1],
+   [AnyEvent::Loop::       => AnyEvent::Impl::Perl:: , 1],
+   # everything below here will not (normally) be autoprobed
+   # as the pure perl backend should work everywhere
+   # and is usually faster
+   [Event::                => AnyEvent::Impl::Event::, 1],
+   [Glib::                 => AnyEvent::Impl::Glib:: , 1], # becomes extremely slow with many watchers
+   [Event::Lib::           => AnyEvent::Impl::EventLib::], # too buggy
+   [Irssi::                => AnyEvent::Impl::Irssi::],    # Irssi has a bogus "Event" package
+   [Tk::                   => AnyEvent::Impl::Tk::],       # crashes with many handles
+   [Qt::                   => AnyEvent::Impl::Qt::],       # requires special main program
+   [POE::Kernel::          => AnyEvent::Impl::POE::],      # lasciate ogni speranza
+   [Wx::                   => AnyEvent::Impl::POE::],
+   [Prima::                => AnyEvent::Impl::POE::],
+   [IO::Async::Loop::      => AnyEvent::Impl::IOAsync::],  # a bitch to autodetect
+   [Cocoa::EventLoop::     => AnyEvent::Impl::Cocoa::],
+   [FLTK::                 => AnyEvent::Impl::FLTK2::],
+);
+
+# all autoloaded methods reserve the complete glob, not just the method slot.
+# due to bugs in perls method cache implementation.
+our @methods = qw(io timer time now now_update signal child idle condvar);
+
 sub detect() {
+   local $!; # for good measure
+   local $SIG{__DIE__}; # we use eval
+
    # free some memory
    *detect = sub () { $MODEL };
+   # undef &func doesn't correctly update the method cache. grmbl.
+   # so we delete the whole glob. grmbl.
+   # otoh, perl doesn't let me undef an active usb, but it lets me free
+   # a glob with an active sub. hrm. i hope it works, but perl is
+   # usually buggy in this department. sigh.
+   delete @{"AnyEvent::"}{@methods};
+   undef @methods;
 
-   local $!; # for good measure
-   local $SIG{__DIE__};
-
-   if ($ENV{PERL_ANYEVENT_MODEL} =~ /^([a-zA-Z]+)$/) {
-      my $model = "AnyEvent::Impl::$1";
+   if ($ENV{PERL_ANYEVENT_MODEL} =~ /^([a-zA-Z0-9:]+)$/) {
+      my $model = $1;
+      $model = "AnyEvent::Impl::$model" unless $model =~ s/::$//;
       if (eval "require $model") {
          $MODEL = $model;
          warn "AnyEvent: loaded model '$model' (forced by \$ENV{PERL_ANYEVENT_MODEL}), using it.\n" if $VERBOSE >= 2;
@@ -1285,25 +1357,42 @@ sub detect() {
       }
    }
 
-   @models = (); # free probe data
+   # free memory only needed for probing
+   undef @models;
+   undef @REGISTRY;
 
    push @{"$MODEL\::ISA"}, "AnyEvent::Base";
    unshift @ISA, $MODEL;
 
    # now nuke some methods that are overridden by the backend.
-   # SUPER is not allowed.
+   # SUPER usage is not allowed in these.
    for (qw(time signal child idle)) {
       undef &{"AnyEvent::Base::$_"}
          if defined &{"$MODEL\::$_"};
    }
 
    if ($ENV{PERL_ANYEVENT_STRICT}) {
-      eval { require AnyEvent::Strict };
-      warn "AnyEvent: cannot load AnyEvent::Strict: $@"
-         if $@ && $VERBOSE;
+      require AnyEvent::Strict;
+   }
+
+   if ($ENV{PERL_ANYEVENT_DEBUG_WRAP}) {
+      require AnyEvent::Debug;
+      AnyEvent::Debug::wrap ($ENV{PERL_ANYEVENT_DEBUG_WRAP});
+   }
+
+   if (exists $ENV{PERL_ANYEVENT_DEBUG_SHELL}) {
+      require AnyEvent::Socket;
+      require AnyEvent::Debug;
+
+      my $shell = $ENV{PERL_ANYEVENT_DEBUG_SHELL};
+      $shell =~ s/\$\$/$$/g;
+
+      my ($host, $service) = AnyEvent::Socket::parse_hostport ($shell);
+      $AnyEvent::Debug::SHELL = AnyEvent::Debug::shell ($host, $service);
    }
 
    (shift @post_detect)->() while @post_detect;
+   undef @post_detect;
 
    *post_detect = sub(&) {
       shift->();
@@ -1314,16 +1403,14 @@ sub detect() {
    $MODEL
 }
 
-sub AUTOLOAD {
-   (my $func = $AUTOLOAD) =~ s/.*://;
-
-   $method{$func}
-      or Carp::croak "$func: not a valid AnyEvent class method";
-
-   detect;
-
-   my $class = shift;
-   $class->$func (@_);
+for my $name (@methods) {
+   *$name = sub {
+      detect;
+      # we use goto because
+      # a) it makes the thunk more transparent
+      # b) it allows us to delete the thunk later
+      goto &{ UNIVERSAL::can AnyEvent => "SUPER::$name" }
+   };
 }
 
 # utility function to dup a filehandle. this is used by many backends
@@ -1357,44 +1444,53 @@ package AE;
 
 our $VERSION = $AnyEvent::VERSION;
 
-# fall back to the main API by default - backends and AnyEvent::Base
-# implementations can overwrite these.
+sub _reset() {
+   eval q{ 
+      # fall back to the main API by default - backends and AnyEvent::Base
+      # implementations can overwrite these.
 
-sub io($$$) {
-   AnyEvent->io (fh => $_[0], poll => $_[1] ? "w" : "r", cb => $_[2])
+      sub io($$$) {
+         AnyEvent->io (fh => $_[0], poll => $_[1] ? "w" : "r", cb => $_[2])
+      }
+
+      sub timer($$$) {
+         AnyEvent->timer (after => $_[0], interval => $_[1], cb => $_[2])
+      }
+
+      sub signal($$) {
+         AnyEvent->signal (signal => $_[0], cb => $_[1])
+      }
+
+      sub child($$) {
+         AnyEvent->child (pid => $_[0], cb => $_[1])
+      }
+
+      sub idle($) {
+         AnyEvent->idle (cb => $_[0]);
+      }
+
+      sub cv(;&) {
+         AnyEvent->condvar (@_ ? (cb => $_[0]) : ())
+      }
+
+      sub now() {
+         AnyEvent->now
+      }
+
+      sub now_update() {
+         AnyEvent->now_update
+      }
+
+      sub time() {
+         AnyEvent->time
+      }
+
+      *postpone = \&AnyEvent::postpone;
+   };
+   die if $@;
 }
 
-sub timer($$$) {
-   AnyEvent->timer (after => $_[0], interval => $_[1], cb => $_[2])
-}
-
-sub signal($$) {
-   AnyEvent->signal (signal => $_[0], cb => $_[1])
-}
-
-sub child($$) {
-   AnyEvent->child (pid => $_[0], cb => $_[1])
-}
-
-sub idle($) {
-   AnyEvent->idle (cb => $_[0])
-}
-
-sub cv(;&) {
-   AnyEvent->condvar (@_ ? (cb => $_[0]) : ())
-}
-
-sub now() {
-   AnyEvent->now
-}
-
-sub now_update() {
-   AnyEvent->now_update
-}
-
-sub time() {
-   AnyEvent->time
-}
+BEGIN { _reset }
 
 package AnyEvent::Base;
 
@@ -1423,7 +1519,12 @@ sub time {
 
 sub now_update { }
 
+sub _poll {
+   Carp::croak "$AnyEvent::MODEL does not support blocking waits. Caught";
+}
+
 # default implementation for ->condvar
+# in fact, the default should not be overwritten
 
 sub condvar {
    eval q{ # poor man's autoloading {}
@@ -1603,7 +1704,7 @@ sub signal {
          while (%SIG_EV) {
             for (keys %SIG_EV) {
                delete $SIG_EV{$_};
-               $_->() for values %{ $SIG_CB{$_} || {} };
+               &$_ for values %{ $SIG_CB{$_} || {} };
             }
          }
       };
@@ -1640,10 +1741,10 @@ sub child {
       *child = sub {
          my (undef, %arg) = @_;
 
-         defined (my $pid = $arg{pid} + 0)
-            or Carp::croak "required option 'pid' is missing";
+         my $pid = $arg{pid};
+         my $cb  = $arg{cb};
 
-         $PID_CB{$pid}{$arg{cb}} = $arg{cb};
+         $PID_CB{$pid}{$cb+0} = $cb;
 
          unless ($CHLD_W) {
             $CHLD_W = AE::signal CHLD => \&_sigchld;
@@ -1651,13 +1752,13 @@ sub child {
             &_sigchld;
          }
 
-         bless [$pid, $arg{cb}], "AnyEvent::Base::child"
+         bless [$pid, $cb+0], "AnyEvent::Base::child"
       };
 
       *AnyEvent::Base::child::DESTROY = sub {
-         my ($pid, $cb) = @{$_[0]};
+         my ($pid, $icb) = @{$_[0]};
 
-         delete $PID_CB{$pid}{$cb};
+         delete $PID_CB{$pid}{$icb};
          delete $PID_CB{$pid} unless keys %{ $PID_CB{$pid} };
 
          undef $CHLD_W unless keys %PID_CB;
@@ -1680,9 +1781,9 @@ sub idle {
 
          $rcb = sub {
             if ($cb) {
-               $w = _time;
+               $w = AE::time;
                &$cb;
-               $w = _time - $w;
+               $w = AE::time - $w;
 
                # never use more then 50% of the time for the idle watcher,
                # within some limits
@@ -1739,6 +1840,10 @@ sub _send {
    # nop
 }
 
+sub _wait {
+   AnyEvent->_poll until $_[0]{_ae_sent};
+}
+
 sub send {
    my $cv = shift;
    $cv->{_ae_sent} = [@_];
@@ -1755,20 +1860,21 @@ sub ready {
    $_[0]{_ae_sent}
 }
 
-sub _wait {
-   $WAITING
-      and !$_[0]{_ae_sent}
-      and Carp::croak "AnyEvent::CondVar: recursive blocking wait detected";
-
-   local $WAITING = 1;
-   AnyEvent->one_event while !$_[0]{_ae_sent};
-}
-
 sub recv {
-   $_[0]->_wait;
+   unless ($_[0]{_ae_sent}) {
+      $WAITING
+         and Carp::croak "AnyEvent::CondVar: recursive blocking wait attempted";
 
-   Carp::croak $_[0]{_ae_croak} if $_[0]{_ae_croak};
-   wantarray ? @{ $_[0]{_ae_sent} } : $_[0]{_ae_sent}[0]
+      local $WAITING = 1;
+      $_[0]->_wait;
+   }
+
+   $_[0]{_ae_croak}
+      and Carp::croak $_[0]{_ae_croak};
+
+   wantarray
+      ? @{ $_[0]{_ae_sent} }
+      : $_[0]{_ae_sent}[0]
 }
 
 sub cb {
@@ -1794,7 +1900,7 @@ sub end {
 
 # undocumented/compatibility with pre-3.4
 *broadcast = \&send;
-*wait      = \&_wait;
+*wait      = \&recv;
 
 =head1 ERROR AND EXCEPTION HANDLING
 
@@ -1856,18 +1962,44 @@ Unlike C<use strict> (or its modern cousin, C<< use L<common::sense>
 C<PERL_ANYEVENT_STRICT=1> in your environment while developing programs
 can be very useful, however.
 
+=item C<PERL_ANYEVENT_DEBUG_SHELL>
+
+If this env variable is set, then its contents will be interpreted by
+C<AnyEvent::Socket::parse_hostport> (after replacing every occurance of
+C<$$> by the process pid) and an C<AnyEvent::Debug::shell> is bound on
+that port. The shell object is saved in C<$AnyEvent::Debug::SHELL>.
+
+This takes place when the first watcher is created.
+
+For example, to bind a debug shell on a unix domain socket in
+F<< /tmp/debug<pid>.sock >>, you could use this:
+
+   PERL_ANYEVENT_DEBUG_SHELL=unix/:/tmp/debug\$\$.sock perlprog
+
+Note that creating sockets in F</tmp> is very unsafe on multiuser
+systems.
+
+=item C<PERL_ANYEVENT_DEBUG_WRAP>
+
+Can be set to C<0>, C<1> or C<2> and enables wrapping of all watchers for
+debugging purposes. See C<AnyEvent::Debug::wrap> for details.
+
 =item C<PERL_ANYEVENT_MODEL>
 
 This can be used to specify the event model to be used by AnyEvent, before
-auto detection and -probing kicks in. It must be a string consisting
-entirely of ASCII letters. The string C<AnyEvent::Impl::> gets prepended
-and the resulting module name is loaded and if the load was successful,
-used as event model. If it fails to load AnyEvent will proceed with
+auto detection and -probing kicks in.
+
+It normally is a string consisting entirely of ASCII letters (e.g. C<EV>
+or C<IOAsync>). The string C<AnyEvent::Impl::> gets prepended and the
+resulting module name is loaded and - if the load was successful - used as
+event model backend. If it fails to load then AnyEvent will proceed with
 auto detection and -probing.
 
-This functionality might change in future versions.
+If the string ends with C<::> instead (e.g. C<AnyEvent::Impl::EV::>) then
+nothing gets prepended and the module name is used as-is (hint: C<::> at
+the end of a string designates a module name and quotes it appropriately).
 
-For example, to force the pure perl model (L<AnyEvent::Impl::Perl>) you
+For example, to force the pure perl model (L<AnyEvent::Loop::Perl>) you
 could start your program like this:
 
    PERL_ANYEVENT_MODEL=Perl perl ...
@@ -2576,7 +2708,7 @@ the help of L<AnyEvent::TLS>), gains the ability to do TLS/SSL.
 
 This module is part of perl since release 5.008. It will be used when the
 chosen event library does not come with a timing source of its own. The
-pure-perl event loop (L<AnyEvent::Impl::Perl>) will additionally use it to
+pure-perl event loop (L<AnyEvent::Loop>) will additionally load it to
 try to use a monotonic clock for timing stability.
 
 =back
@@ -2654,8 +2786,8 @@ FAQ: L<AnyEvent::FAQ>.
 
 Utility functions: L<AnyEvent::Util>.
 
-Event modules: L<EV>, L<EV::Glib>, L<Glib::EV>, L<Event>, L<Glib::Event>,
-L<Glib>, L<Tk>, L<Event::Lib>, L<Qt>, L<POE>.
+Event modules: L<AnyEvent::Loop>, L<EV>, L<EV::Glib>, L<Glib::EV>,
+L<Event>, L<Glib::Event>, L<Glib>, L<Tk>, L<Event::Lib>, L<Qt>, L<POE>.
 
 Implementations: L<AnyEvent::Impl::EV>, L<AnyEvent::Impl::Event>,
 L<AnyEvent::Impl::Glib>, L<AnyEvent::Impl::Tk>, L<AnyEvent::Impl::Perl>,

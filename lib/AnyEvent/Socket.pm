@@ -60,18 +60,6 @@ our @EXPORT = qw(
 
 our $VERSION = $AnyEvent::VERSION;
 
-# used in cases where we may return immediately but want the
-# caller to do stuff first
-sub _postpone {
-   my ($cb, @args) = (@_, $!);
-
-   my $w; $w = AE::timer 0, 0, sub {
-      undef $w;
-      $! = pop @args;
-      $cb->(@args);
-   };
-}
-
 =item $ipn = parse_ipv4 $dotted_quad
 
 Tries to parse the given dotted quad IPv4 address and return it in
@@ -898,7 +886,7 @@ sub tcp_connect($$$;$) {
          return unless exists $state{fh};
 
          my $target = shift @target
-            or return _postpone sub {
+            or return AE::postpone {
                return unless exists $state{fh};
                %state = ();
                $connect->();
@@ -996,8 +984,8 @@ port will be used).
 
 For UNIX domain sockets, C<$host> must be C<unix/> and C<$service> must be
 the absolute pathname of the socket. This function will try to C<unlink>
-the socket before it tries to bind to it. See SECURITY CONSIDERATIONS,
-below.
+the socket before it tries to bind to it, and will try to unlink it after
+it stops using it. See SECURITY CONSIDERATIONS, below.
 
 For each new connection that could be C<accept>ed, call the C<<
 $accept_cb->($fh, $host, $port) >> with the file handle (in non-blocking
@@ -1082,6 +1070,16 @@ sub tcp_server($$$;$) {
 
    bind $state{fh}, pack_sockaddr $service, $ipn
       or Carp::croak "bind: $!";
+
+   if ($af == AF_UNIX) {
+      my $fh  = $state{fh};
+      my $ino = (stat $fh)[1];
+      $state{unlink} = guard {
+         # this is racy, but is not designed to be foolproof, just best-effort
+         unlink $service
+            if $ino == (stat $fh)[1];
+      };
+   }
 
    fh_nonblocking $state{fh}, 1;
 

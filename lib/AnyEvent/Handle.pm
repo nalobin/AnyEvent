@@ -361,10 +361,11 @@ from most attacks.
 
 =item read_size => <bytes>
 
-The initial read block size, the number of bytes this module will try to
-read during each loop iteration. Each handle object will consume at least
-this amount of memory for the read buffer as well, so when handling many
-connections requirements). See also C<max_read_size>. Default: C<2048>.
+The initial read block size, the number of bytes this module will try
+to read during each loop iteration. Each handle object will consume
+at least this amount of memory for the read buffer as well, so when
+handling many connections watch out for memory requirements). See also
+C<max_read_size>. Default: C<2048>.
 
 =item max_read_size => <bytes>
 
@@ -1545,13 +1546,13 @@ register_read_type regex => sub {
       # accept
       if ($$rbuf =~ $accept) {
          $data .= substr $$rbuf, 0, $+[0], "";
-         $cb->($self, $data);
+         $cb->($_[0], $data);
          return 1;
       }
       
       # reject
       if ($reject && $$rbuf =~ $reject) {
-         $self->_error (Errno::EBADMSG);
+         $_[0]->_error (Errno::EBADMSG);
       }
 
       # skip
@@ -1577,20 +1578,20 @@ register_read_type netstring => sub {
    sub {
       unless ($_[0]{rbuf} =~ s/^(0|[1-9][0-9]*)://) {
          if ($_[0]{rbuf} =~ /[^0-9]/) {
-            $self->_error (Errno::EBADMSG);
+            $_[0]->_error (Errno::EBADMSG);
          }
          return;
       }
 
       my $len = $1;
 
-      $self->unshift_read (chunk => $len, sub {
+      $_[0]->unshift_read (chunk => $len, sub {
          my $string = $_[1];
          $_[0]->unshift_read (chunk => 1, sub {
             if ($_[1] eq ",") {
                $cb->($_[0], $string);
             } else {
-               $self->_error (Errno::EBADMSG);
+               $_[0]->_error (Errno::EBADMSG);
             }
          });
       });
@@ -1673,26 +1674,26 @@ register_read_type json => sub {
    my $rbuf = \$self->{rbuf};
 
    sub {
-      my $ref = eval { $json->incr_parse ($self->{rbuf}) };
+      my $ref = eval { $json->incr_parse ($_[0]{rbuf}) };
 
       if ($ref) {
-         $self->{rbuf} = $json->incr_text;
+         $_[0]{rbuf} = $json->incr_text;
          $json->incr_text = "";
-         $cb->($self, $ref);
+         $cb->($_[0], $ref);
 
          1
       } elsif ($@) {
          # error case
          $json->incr_skip;
 
-         $self->{rbuf} = $json->incr_text;
+         $_[0]{rbuf} = $json->incr_text;
          $json->incr_text = "";
 
-         $self->_error (Errno::EBADMSG);
+         $_[0]->_error (Errno::EBADMSG);
 
          ()
       } else {
-         $self->{rbuf} = "";
+         $_[0]{rbuf} = "";
 
          ()
       }
@@ -1735,7 +1736,7 @@ register_read_type storable => sub {
             if (my $ref = eval { Storable::thaw ($_[1]) }) {
                $cb->($_[0], $ref);
             } else {
-               $self->_error (Errno::EBADMSG);
+               $_[0]->_error (Errno::EBADMSG);
             }
          });
       }
@@ -2012,7 +2013,8 @@ sub starttls {
    $self->{_rbio} = Net::SSLeay::BIO_new (Net::SSLeay::BIO_s_mem ());
    $self->{_wbio} = Net::SSLeay::BIO_new (Net::SSLeay::BIO_s_mem ());
 
-   Net::SSLeay::BIO_write ($self->{_rbio}, delete $self->{rbuf});
+   Net::SSLeay::BIO_write ($self->{_rbio}, $self->{rbuf});
+   $self->{rbuf} = "";
 
    Net::SSLeay::set_bio ($tls, $self->{_rbio}, $self->{_wbio});
 
@@ -2306,6 +2308,10 @@ will be in C<$_[0]{rbuf}>:
    $handle->on_error (sub {
       my $data = delete $_[0]{rbuf};
    });
+
+Note that this example removes the C<rbuf> member from the handle object,
+which is not normally allowed by the API. It is expressly permitted in
+this case only, as the handle object needs to be destroyed afterwards.
 
 The reason to use C<on_error> is that TCP connections, due to latencies
 and packets loss, might get closed quite violently with an error, when in

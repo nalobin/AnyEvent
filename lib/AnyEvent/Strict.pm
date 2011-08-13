@@ -38,6 +38,7 @@ AnyEvent::post_detect {
    my $MODEL = shift @AnyEvent::ISA;
    unshift @ISA, $MODEL;
    unshift @AnyEvent::ISA, AnyEvent::Strict::;
+   AE::_reset;
 };
 
 sub io {

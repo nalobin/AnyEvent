@@ -35,7 +35,7 @@ This module uses the default Glib main context for all its watchers.
 package AnyEvent::Impl::Glib;
 
 use AnyEvent (); BEGIN { AnyEvent::common_sense }
-use Glib ();
+use Glib 1.210 (); # (stable 1.220 2009, also Glib 2.4+ required, 2004)
 
 our $mainloop = Glib::MainContext->default;
 
@@ -82,6 +82,7 @@ sub idle {
    
    my $cb = $arg{cb};
    my $source = add Glib::Idle sub { &$cb; 1 };
+
    bless \\$source, $class
 }
 
@@ -89,13 +90,51 @@ sub DESTROY {
    remove Glib::Source $${$_[0]};
 }
 
-sub one_event {
+our %pid_w;
+our %pid_cb;
+
+sub child {
+   my ($class, %arg) = @_;
+
+   $arg{pid} > 0
+      or Carp::croak "Glib does not support watching for all pids (pid == 0) as attempted";
+
+   my $pid = $arg{pid};
+   my $cb  = $arg{cb};
+
+   $pid_cb{$pid}{$cb+0} = $cb;
+
+   $pid_w{$pid} ||= Glib::Child->watch_add ($pid, sub {
+      $_->($_[0], $_[1])
+         for values %{ $pid_cb{$pid} };
+
+      1
+   });
+
+   bless [$pid, $cb+0], "AnyEvent::Impl::Glib::child"
+}
+
+sub AnyEvent::Impl::Glib::child::DESTROY {
+   my ($pid, $icb) = @{ $_[0] };
+
+   delete $pid_cb{$pid}{$icb};
+   unless (%{ $pid_cb{$pid} }) {
+      delete $pid_cb{$pid};
+      remove Glib::Source delete $pid_w{$pid};
+   }
+}
+
+#sub loop {
+#   # hackish, but we do not have a mainloop, just a maincontext
+#   $mainloop->iteration (1) while 1;
+#}
+
+sub _poll {
    $mainloop->iteration (1);
 }
 
-sub loop {
-   # hackish, but we do not have a mainloop, just a maincontext
-   $mainloop->iteration (1) while 1;
+sub AnyEvent::CondVar::Base::_wait {
+   $mainloop->iteration (1) until $_[0]{_ae_sent};
 }
 
 1;

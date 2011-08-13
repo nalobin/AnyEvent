@@ -26,7 +26,7 @@ AE - simpler/faster/newer/cooler AnyEvent API
   };
 
   # called when event loop idle (if applicable)
-  my $w = AE::idle { ... };
+  my $w = AE::idle sub { ... };
 
   my $w = AE::cv; # stores whether a condition was flagged
   $w->send; # wake up current and all future recv's
@@ -156,6 +156,10 @@ Ensures that the current event loop time is up to date.
 =item AE::time
 
 Return the current time (not cached, always consults a hardware clock).
+
+=item AE::postpone { BLOCK }
+
+Exactly the same as C<AnyEvent:::postpone>.
 
 =back
 

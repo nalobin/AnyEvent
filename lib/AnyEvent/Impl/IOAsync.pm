@@ -90,8 +90,8 @@ package AnyEvent::Impl::IOAsync;
 
 use AnyEvent (); BEGIN { AnyEvent::common_sense }
 
-use Time::HiRes;
-use Scalar::Util;
+use Time::HiRes ();
+use Scalar::Util ();
 
 use IO::Async::Loop 0.33;
 
@@ -104,7 +104,6 @@ sub set_loop($) {
 sub timer {
    my ($class, %arg) = @_;
    
-   # IO::Async has problems with overloaded objects
    my $cb = $arg{cb};
 
    my $id;
@@ -121,6 +120,7 @@ sub timer {
       Scalar::Util::weaken $ival_cb;
 
    } else {
+      # IO::Async has problems with overloaded objects
       $id = $LOOP->enqueue_timer (delay => $arg{after}, code => sub { &$cb });
    }
 
@@ -161,12 +161,14 @@ sub signal {
    my $signal = $arg{signal};
 
    my $id = $LOOP->attach_signal ($arg{signal}, $arg{cb});
-   bless [$signal, $id], "AnyEvent::Impl::IOAsync::signal";
+   bless [$signal, $id], "AnyEvent::Impl::IOAsync::signal"
 }
 
 sub AnyEvent::Impl::IOAsync::signal::DESTROY {
    $LOOP->detach_signal (@{ $_[0] });
 }
+
+our %pid_cb;
 
 sub child {
    my ($class, %arg) = @_;
@@ -174,19 +176,48 @@ sub child {
    my $pid = $arg{pid};
 
    $LOOP->watch_child ($pid, $arg{cb});
-   bless [$pid], "AnyEvent::Impl::IOAsync::child";
+   bless [$pid], "AnyEvent::Impl::IOAsync::child"
+}
+
+sub child {
+   my ($class, %arg) = @_;
+
+   my $pid = $arg{pid};
+   my $cb  = $arg{cb};
+
+   unless (%{ $pid_cb{$pid} }) {
+      $LOOP->watch_child ($pid, sub {
+         $_->($_[0], $_[1])
+            for values %{ $pid_cb{$pid} };
+      });
+   }
+
+   $pid_cb{$pid}{$cb+0} = $cb;
+
+   bless [$pid, $cb+0], "AnyEvent::Impl::IOAsync::child"
 }
 
 sub AnyEvent::Impl::IOAsync::child::DESTROY {
-   $LOOP->unwatch_child (@{ $_[0] });
+   my ($pid, $icb) = @{ $_[0] };
+
+   delete $pid_cb{$pid}{$icb};
+
+   unless (%{ $pid_cb{$pid} }) {
+      delete $pid_cb{$pid};
+      $LOOP->unwatch_child ($pid);
+   }
 }
 
-sub one_event {
+#sub loop {
+#   $LOOP->loop_forever;
+#}
+
+sub _poll {
    $LOOP->loop_once;
 }
 
-sub loop {
-   $LOOP->loop_forever;
+sub AnyEvent::CondVar::Base::_wait {
+   $LOOP->loop_once until $_[0]{_ae_sent};
 }
 
 1;

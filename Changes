@@ -4,8 +4,59 @@ TODO: document TCP_*** constants
 TODO: catch AE::xxx for anyevent strict and anyevent debug
 TODO: anyevent::trace? or debug tracing all watchers?
 TODO: anyevent strict checking for $_ changes?
-TODO: break the API and put the rr ttl where it belongs.
-TODO: Kevin Ryde         (3.8K)   1 inbox       Glib child processes
+
+TODO: IO::Async sometimes cancels the wrong timer when you call cancel_timer -wait for IO::Async release.
+TODO: wrap
+TODO: parse_unix???
+TODO: logging?
+	- INCOMPATIBLE CHANGE: AnyEvent::DNS resource records now include
+          the TTL as fourth element - this affects ->resolve directly,
+          and ->request and ->dns_unpack indirectly. Convenience functions
+          such as AnyEvent::DNS::{a,txt,mx,srv} are not affected, neither
+          is AnyEvent::Socket.
+        - INCOMPATIBLE CHANGE: backend authors now should not implement
+          one_event or loop, but instead the AnyEvent::CondVar::_wait and _poll
+          methods.
+        - DEPRECIATION: please change
+          "use AnyEvent::Impl::Perl" to "use AnyEvent::Loop" and
+          "AnyEvent::Impl::Perl::loop" to "AnyEvent::Loop::run"
+          in your programs, for future compatibility.
+        - *blush* idle watcher emulation was borked.
+        - AnyEvent::Strict now checks the AE::xxx functions as well.
+        - querying too long domain names would barf deep inside AnyEvent::DNS - since
+          this is hard to avoid for applications, AnyEvent:.DNS::request now checks for
+          for too long domain names explicitly and passes an undef to the callback
+          instead (reported by James Bromberger).
+        - make AnyEvent::Util more robust against EINTR (analyzed by Andrew Suffield).
+        - new function: AnyEvent::postpone.
+        - new env variable, PERL_ANYEVENT_DEBUG_SHELL, to automatically start
+          a debug shell.
+        - new env variable, PERL_ANYEVENT_DEBUG_WRAP, to automatically enable
+          watcher instrumentation/wrapping (see AnyEvent::Debug::wrap).
+        - IO::Async sometimes cancels the wrong timer when you call cancel_timer.
+          Invest extra overhead to work around this peculiar behaviour.
+        - split the pure perl backend into a loop module and an impl
+          module (AnyEvent::Loop and AnyEvent::Impl::Perl).
+        - some read types (regex, netstring, json, storable) could
+          errornously keep an AE::Handle object alive on their own
+          (reported by Mohammad Toossi).
+        - add more workarounds around child watcher bugs in IO::Async
+          and (newly introduced) in POE.
+        - use glib child watchers and try to work around its limitations,
+          if possible (based on a patch by Kevin Ryde).
+	- add support for FLTK (fltk2), via AnyEvent::Impl::FLTK2.
+        - many read types in AnyEvent::Handle would malfunction during
+          transitions to TLS because of a "delete $self->{rbuf}".
+          (reported by Gerald Galster).
+        - improve condvar blocking wait performance (probably only noticable
+          with faster backends), also make it easier for event loops that
+          do not support blocking waits.
+        - PERL_ANYEVENT_MODEL now also allows full module names, although
+          the usefulness of this feature is not yet clear.
+        - add tests for all supported event loops, conditional on PERL_ANYEVENT_LOOP_TESTS.
+        - add t/80_ssltext.t.
+        - no longer use AUTOLOAD for the initial loading (for no very good reason).
+        - tcp_server now tries to unlink unix domain sockets when it gets destroyed.
 
 5.34  Thu May 12 09:59:41 CEST 2011
 	- AE::TLS didn't support both cert_file and key at the same time,
