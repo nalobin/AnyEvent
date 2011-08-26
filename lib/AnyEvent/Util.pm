@@ -60,7 +60,7 @@ BEGIN {
 
    while (my ($k, $v) = each %ERR) {
       next if eval "Errno::$k ()";
-      warn "AnyEvent::Util: broken Errno module, adding Errno::$k.\n" if $AnyEvent::VERBOSE >= 8;
+      AE::log 8 => "AnyEvent::Util: broken Errno module, adding Errno::$k.";
 
       eval "sub Errno::$k () { $v }";
       push @Errno::EXPORT_OK, $k;
@@ -156,7 +156,7 @@ BEGIN {
       };
 
       *portable_socketpair = sub () {
-         socketpair my $fh1, my $fh2, Socket::AF_UNIX(), Socket::SOCK_STREAM(), Socket::PF_UNSPEC()
+         socketpair my $fh1, my $fh2, Socket::AF_UNIX(), Socket::SOCK_STREAM(), 0
             or return;
 
          ($fh1, $fh2)
@@ -387,11 +387,9 @@ guard.
 
 BEGIN {
    if (!$ENV{PERL_ANYEVENT_AVOID_GUARD} && eval { require Guard; $Guard::VERSION >= 0.5 }) {
-      warn "AnyEvent::Util: using Guard module to implement guards.\n" if $AnyEvent::VERBOSE >= 8;
       *guard = \&Guard::guard;
+      AE::log 8 => "AnyEvent::Util: using Guard module to implement guards.";
    } else {
-      warn "AnyEvent::Util: using pure-perl guard implementation.\n" if $AnyEvent::VERBOSE >= 8;
-
       *AnyEvent::Util::guard::DESTROY = sub {
          local $@;
 
@@ -400,7 +398,7 @@ BEGIN {
             ${$_[0]}->();
          };
 
-         warn "runtime error in AnyEvent::guard callback: $@" if $@;
+         AE::log 5 => "runtime error in AnyEvent::guard callback: $@" if $@;
       };
 
       *AnyEvent::Util::guard::cancel = sub ($) {
@@ -410,6 +408,8 @@ BEGIN {
       *guard = sub (&) {
          bless \(my $cb = shift), "AnyEvent::Util::guard"
       };
+
+      AE::log 8 => "AnyEvent::Util: using pure-perl guard implementation.";
    }
 }
 

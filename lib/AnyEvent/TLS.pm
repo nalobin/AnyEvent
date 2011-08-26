@@ -641,7 +641,7 @@ sub new {
       if exists $arg{session_ticket};
 
    $self->{debug} = $ENV{PERL_ANYEVENT_TLS_DEBUG}
-      if exists $ENV{PERL_ANYEVENT_TLS_DEBUG};
+      if length $ENV{PERL_ANYEVENT_TLS_DEBUG};
 
    $self->{debug} = $arg{debug}
       if exists $arg{debug};
@@ -659,7 +659,7 @@ sub new {
          if (exists $arg{ca_file} or exists $arg{ca_path}) {
             Net::SSLeay::CTX_load_verify_locations ($ctx, $arg{ca_file}, $arg{ca_path});
          }
-      } elsif (exists $ENV{PERL_ANYEVENT_CA_FILE} or exists $ENV{PERL_ANYEVENT_CA_PATH}) {
+      } elsif (length $ENV{PERL_ANYEVENT_CA_FILE} or length $ENV{PERL_ANYEVENT_CA_PATH}) {
          Net::SSLeay::CTX_load_verify_locations (
             $ctx,
             $ENV{PERL_ANYEVENT_CA_FILE},
@@ -876,8 +876,8 @@ later. It is harmless to call C<AnyEvent::TLS::init> multiple times.
 sub init() {
    return if $REF_IDX;
 
-   warn "AnyEvent::TLS: Net::SSLeay versions older than 1.33 might malfunction.\n"
-      if $AnyEvent::VERBOSE && $Net::SSLeay::VERSION < 1.33;
+   AE::log 5 => "AnyEvent::TLS: Net::SSLeay versions older than 1.33 might malfunction."
+      if $Net::SSLeay::VERSION < 1.33;
 
    Net::SSLeay::load_error_strings ();
    Net::SSLeay::SSLeay_add_ssl_algorithms ();

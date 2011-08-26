@@ -700,12 +700,11 @@ sub resolver() {
    $RESOLVER || do {
       $RESOLVER = new AnyEvent::DNS
          untaint         => 1,
-         exists $ENV{PERL_ANYEVENT_MAX_OUTSTANDING_DNS}
-            ? (max_outstanding => $ENV{PERL_ANYEVENT_MAX_OUTSTANDING_DNS}*1 || 1) : (),
+         max_outstanding => $ENV{PERL_ANYEVENT_MAX_OUTSTANDING_DNS}*1 || 1,
       ;
 
-      exists $ENV{PERL_ANYEVENT_RESOLV_CONF}
-         ? length $ENV{PERL_ANYEVENT_RESOLV_CONF} && $RESOLVER->_parse_resolv_conf_file ($ENV{PERL_ANYEVENT_RESOLV_CONF})
+      $ENV{PERL_ANYEVENT_RESOLV_CONF}
+         ? $RESOLVER->_parse_resolv_conf_file ($ENV{PERL_ANYEVENT_RESOLV_CONF})
          : $RESOLVER->os_config;
 
       $RESOLVER
@@ -847,7 +846,7 @@ sub parse_resolv_conf {
          if (my $ipn = AnyEvent::Socket::parse_address ($ip)) {
             push @{ $self->{server} }, $ipn;
          } else {
-            warn "nameserver $ip invalid and ignored\n";
+            AE::log 5 => "nameserver $ip invalid and ignored, while parsing resolver config.";
          }
       } elsif (/^\s*domain\s+(\S*)\s*$/i) {
          $self->{search} = [$1];

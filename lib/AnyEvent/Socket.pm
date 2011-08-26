@@ -1,6 +1,6 @@
 =head1 NAME
 
-AnyEvent::Socket - useful IPv4 and IPv6 stuff.
+AnyEvent::Socket - useful IPv4 and IPv6 stuff. also unix domain sockets. and stuff.
 
 =head1 SYNOPSIS
 
@@ -143,6 +143,17 @@ sub parse_ipv6($) {
    pack "n*", map hex, @h, @t
 }
 
+=item $token = parse_unix $hostname
+
+This fucntion exists mainly for symmetry to the other C<parse_protocol>
+functions - it takes a hostname and, if it is C<unix/>, it returns a
+special address token, otherwise C<undef>.
+
+The only use for this function is probably to detect whether a hostname
+matches whatever AnyEvent uses for unix domain sockets.
+
+=cut
+
 sub parse_unix($) {
    $_[0] eq "unix/"
       ? pack "S", AF_UNIX
@@ -231,14 +242,17 @@ following formats, where C<port> can be a numerical port number of a
 service name, or a C<name=port> string, and the C< port> and C<:port>
 parts are optional. Also, everywhere where an IP address is supported
 a hostname or unix domain socket address is also supported (see
-C<parse_unix>).
+C<parse_unix>), and strings starting with C</> will also be interpreted as
+unix domain sockets.
 
-   hostname:port    e.g. "www.linux.org", "www.x.de:443", "www.x.de:https=443"
+   hostname:port    e.g. "www.linux.org", "www.x.de:443", "www.x.de:https=443",
    ipv4:port        e.g. "198.182.196.56", "127.1:22"
    ipv6             e.g. "::1", "affe::1"
    [ipv4or6]:port   e.g. "[::1]", "[10.0.1]:80"
    [ipv4or6] port   e.g. "[127.0.0.1]", "[www.x.org] 17"
    ipv4or6 port     e.g. "::1 443", "10.0.0.1 smtp"
+   unix/:path       e.g. "unix/:/path/to/socket"
+   /path            e.g. "/path/to/socket"
 
 It also supports defaulting the service name in a simple way by using
 C<$default_service> if no service was detected. If neither a service was
@@ -257,12 +271,19 @@ Example:
   print join ",", parse_hostport "[::1]";
   # => "," (empty list)
 
+  print join ",", parse_host_port "/tmp/debug.sock";
+  # => "unix/", "/tmp/debug.sock"
+
 =cut
 
 sub parse_hostport($;$) {
    my ($host, $port);
 
    for ("$_[0]") { # work on a copy, just in case, and also reset pos
+
+      # shortcut for /path
+      return ("unix/", $_)
+         if m%^/%;
 
       # parse host, special cases: "ipv6" or "ipv6 port"
       unless (
@@ -288,6 +309,7 @@ sub parse_hostport($;$) {
       } else {
          return;
       }
+
    }
 
    # hostnames must not contain :'s
@@ -589,6 +611,12 @@ used as-is. If you know that the service name is not in your services
 database, then you can specify the service in the format C<name=port>
 (e.g. C<http=80>).
 
+If a host cannot be found via DNS, then it will be looked up in
+F</etc/hosts> (or the file specified via C<< $ENV{PERL_ANYEVENT_HOSTS}
+>>). If they are found, the addresses there will be used. The effect is as
+if entries from F</etc/hosts> would yield C<A> and C<AAAA> records for the
+host name unless DNS already had records for them.
+
 For UNIX domain sockets, C<$node> must be the string C<unix/> and
 C<$service> must be the absolute pathname of the socket. In this case,
 C<$proto> will be ignored.
@@ -617,6 +645,45 @@ Example:
    resolve_sockaddr "google.com", "http", 0, undef, undef, sub { ... };
 
 =cut
+
+our %HOSTS;
+our $HOSTS;
+
+if (
+   open my $fh, "<",
+      length $ENV{PERL_ANYEVENT_HOSTS} ? $ENV{PERL_ANYEVENT_HOSTS}
+      : AnyEvent::WIN32                ? "$ENV{SystemRoot}/system32/drivers/etc/hosts"
+      :                                  "/etc/hosts"
+) {
+   local $/;
+   binmode $fh;
+   $HOSTS = <$fh>;
+} else {
+   $HOSTS = "";
+}
+
+sub _parse_hosts() {
+   #%HOSTS = ();
+
+   for (split /\n/, $HOSTS) {
+      s/#.*$//;
+      s/^[ \t]+//;
+      y/A-Z/a-z/;
+
+      my ($addr, @aliases) = split /[ \t]+/;
+      next unless @aliases;
+
+      if (my $ip = parse_ipv4 $addr) {
+         push @{ $HOSTS{$_}[0] }, $ip
+            for @aliases;
+      } elsif (my $ip = parse_ipv6 $addr) {
+         push @{ $HOSTS{$_}[1] }, $ip
+            for @aliases;
+      }
+   }
+
+   undef $HOSTS;
+}
 
 sub resolve_sockaddr($$$$$$) {
    my ($node, $service, $proto, $family, $type, $cb) = @_;
@@ -690,24 +757,39 @@ sub resolve_sockaddr($$$$$$) {
                            pack_sockaddr $port, $noden]]
             }
          } else {
-            # ipv4
+            $node =~ y/A-Z/a-z/;
+
+            my $hosts = $HOSTS{$node};
+
+            # a records
             if ($family != 6) {
                $cv->begin;
                AnyEvent::DNS::a $node, sub {
-                  push @res, [$idx, "ipv4", [AF_INET, $type, $proton,
-                              pack_sockaddr $port, parse_ipv4 $_]]
+                  push @res, [$idx, "ipv4", [AF_INET , $type, $proton, pack_sockaddr $port, parse_ipv4 $_]]
                      for @_;
+
+                  # dns takes precedence over hosts
+                  push @res,
+                     map [$idx, "ipv4", [AF_INET , $type, $proton, pack_sockaddr $port, $_]],
+                        @{ $hosts->[0] }
+                     unless @_;
+
                   $cv->end;
                };
             }
 
-            # ipv6
+            # aaaa records
             if ($family != 4) {
                $cv->begin;
                AnyEvent::DNS::aaaa $node, sub {
-                  push @res, [$idx, "ipv6", [AF_INET6, $type, $proton,
-                              pack_sockaddr $port, parse_ipv6 $_]]
+                  push @res, [$idx, "ipv6", [AF_INET6, $type, $proton, pack_sockaddr $port, parse_ipv6 $_]]
                      for @_;
+
+                  push @res,
+                     map [$idx + 0.5, "ipv6", [AF_INET6, $type, $proton, pack_sockaddr $port, $_]],
+                        @{ $hosts->[1] }
+                     unless @_;
+
                   $cv->end;
                };
             }
@@ -718,6 +800,12 @@ sub resolve_sockaddr($$$$$$) {
 
    $node = AnyEvent::Util::idn_to_ascii $node
       if $node =~ /[^\x00-\x7f]/;
+
+   # parse hosts
+   if (defined $HOSTS) {
+      _parse_hosts;
+      undef &_parse_hosts;
+   }
 
    # try srv records, if applicable
    if ($node eq "localhost") {
@@ -833,12 +921,12 @@ to 15 seconds.
          $handle = new AnyEvent::Handle
             fh     => $fh,
             on_error => sub {
-               warn "error $_[2]\n";
+               AE::log error => "error $_[2]";
                $_[0]->destroy;
             },
             on_eof => sub {
                $handle->destroy; # destroy handle
-               warn "done.\n";
+               AE::log info => "done.";
             };
 
          $handle->push_write ("GET / HTTP/1.0\015\012\015\012");
@@ -1023,7 +1111,7 @@ to go away.
       syswrite $fh, "The internet is full, $host:$port. Go away!\015\012";
    }, sub {
       my ($fh, $thishost, $thisport) = @_;
-      warn "bound to $thishost, port $thisport\n";
+      AE::log info => "bound to $thishost, port $thisport";
    };
 
 Example: bind a server on a unix domain socket.

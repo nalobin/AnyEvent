@@ -34,8 +34,12 @@ WriteMakefile(
     NAME         => "AnyEvent",
     VERSION_FROM => "lib/AnyEvent.pm",
     PMLIBDIRS    => ["lib"],
+#    PREREQ_PM    => {
+#       Task::Weaken => 0,
+#    },
     META_MERGE => {
         recommends => {
+           "Task::Weaken"     => 0,
            "Net::SSLeay"      => 1.33,
            "JSON"             => 2.09,
            "JSON::XS"         => 2.2,
@@ -51,7 +55,6 @@ WriteMakefile(
         'lib/AnyEvent/Debug.pm'          => '$(INST_LIBDIR)/AnyEvent/Debug.pm',
         'lib/AnyEvent/FAQ.pod'           => '$(INST_LIBDIR)/AnyEvent/FAQ.pod',
         'lib/AnyEvent/Handle.pm'         => '$(INST_LIBDIR)/AnyEvent/Handle.pm',
-        'lib/AnyEvent/Loop.pm'           => '$(INST_LIBDIR)/AnyEvent/Loop.pm',
         'lib/AnyEvent/Impl/Cocoa.pm'     => '$(INST_LIBDIR)/AnyEvent/Impl/Cocoa.pm',
         'lib/AnyEvent/Impl/EV.pm'        => '$(INST_LIBDIR)/AnyEvent/Impl/EV.pm',
         'lib/AnyEvent/Impl/Event.pm'     => '$(INST_LIBDIR)/AnyEvent/Impl/Event.pm',
@@ -65,6 +68,8 @@ WriteMakefile(
         'lib/AnyEvent/Impl/Qt.pm'        => '$(INST_LIBDIR)/AnyEvent/Impl/Qt.pm',
         'lib/AnyEvent/Impl/Tk.pm'        => '$(INST_LIBDIR)/AnyEvent/Impl/Tk.pm',
         'lib/AnyEvent/Intro.pod'         => '$(INST_LIBDIR)/AnyEvent/Intro.pod',
+        'lib/AnyEvent/Log.pm'            => '$(INST_LIBDIR)/AnyEvent/Log.pm',
+        'lib/AnyEvent/Loop.pm'           => '$(INST_LIBDIR)/AnyEvent/Loop.pm',
         'lib/AnyEvent/Socket.pm'         => '$(INST_LIBDIR)/AnyEvent/Socket.pm',
         'lib/AnyEvent/Strict.pm'         => '$(INST_LIBDIR)/AnyEvent/Strict.pm',
         'lib/AnyEvent/TLS.pm'            => '$(INST_LIBDIR)/AnyEvent/TLS.pm',

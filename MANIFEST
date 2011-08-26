@@ -7,29 +7,31 @@ Makefile.PL
 constants.pl.PL
 lib/AE.pm
 lib/AnyEvent.pm
-lib/AnyEvent/Intro.pod
-lib/AnyEvent/FAQ.pod
-lib/AnyEvent/Strict.pm
-lib/AnyEvent/Debug.pm
 lib/AnyEvent/DNS.pm
+lib/AnyEvent/Debug.pm
+lib/AnyEvent/FAQ.pod
+lib/AnyEvent/Handle.pm
+lib/AnyEvent/Impl/Cocoa.pm
+lib/AnyEvent/Impl/EV.pm
+lib/AnyEvent/Impl/Event.pm
+lib/AnyEvent/Impl/EventLib.pm
+lib/AnyEvent/Impl/FLTK2.pm
+lib/AnyEvent/Impl/Glib.pm
+lib/AnyEvent/Impl/IOAsync.pm
+lib/AnyEvent/Impl/Irssi.pm
+lib/AnyEvent/Impl/POE.pm
+lib/AnyEvent/Impl/Perl.pm
+lib/AnyEvent/Impl/Qt.pm
+lib/AnyEvent/Impl/Tk.pm
+lib/AnyEvent/Intro.pod
+lib/AnyEvent/Log.pm
+lib/AnyEvent/Loop.pm
+lib/AnyEvent/Socket.pm
+lib/AnyEvent/Strict.pm
+lib/AnyEvent/TLS.pm
 lib/AnyEvent/Util.pm
 lib/AnyEvent/Util/idna.pl
 lib/AnyEvent/Util/uts46data.pl
-lib/AnyEvent/TLS.pm
-lib/AnyEvent/Handle.pm
-lib/AnyEvent/Socket.pm
-lib/AnyEvent/Loop.pm
-lib/AnyEvent/Impl/EV.pm
-lib/AnyEvent/Impl/Perl.pm
-lib/AnyEvent/Impl/Event.pm
-lib/AnyEvent/Impl/Glib.pm
-lib/AnyEvent/Impl/Tk.pm
-lib/AnyEvent/Impl/Qt.pm
-lib/AnyEvent/Impl/POE.pm
-lib/AnyEvent/Impl/EventLib.pm
-lib/AnyEvent/Impl/IOAsync.pm
-lib/AnyEvent/Impl/Irssi.pm
-lib/AnyEvent/Impl/Cocoa.pm
 
 t/00_load.t
 t/01_basic.t
@@ -41,6 +43,7 @@ t/06_socket.t
 t/07_io.t
 t/08_idna.t
 t/09_multi.t
+t/10_loadall.t
 t/handle/01_readline.t
 t/handle/02_write.t
 t/handle/03_http_req.t
@@ -61,19 +64,7 @@ eg/ae2.pl
 util/gen_uts46data
 util/tst_uts46data
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+mktest			builds the test scripts below
 t/61_fltk_01_basic.t
 t/61_fltk_02_signals.t
 t/61_fltk_03_child.t
@@ -133,5 +124,4 @@ t/69_ev_04_condvar.t
 t/69_ev_05_dns.t
 t/69_ev_07_io.t
 t/69_ev_09_multi.t
-META.yml                                 Module YAML meta-data (added by MakeMaker)
-META.json                                Module JSON meta-data (added by MakeMaker)
+META.yml                                 Module meta-data (added by MakeMaker)

@@ -1,22 +1,18 @@
 Revision history for Perl extension AnyEvent.
 
 TODO: document TCP_*** constants
-TODO: catch AE::xxx for anyevent strict and anyevent debug
-TODO: anyevent::trace? or debug tracing all watchers?
-TODO: anyevent strict checking for $_ changes?
 
-TODO: IO::Async sometimes cancels the wrong timer when you call cancel_timer -wait for IO::Async release.
-TODO: wrap
-TODO: parse_unix???
-TODO: logging?
-	- INCOMPATIBLE CHANGE: AnyEvent::DNS resource records now include
-          the TTL as fourth element - this affects ->resolve directly,
-          and ->request and ->dns_unpack indirectly. Convenience functions
-          such as AnyEvent::DNS::{a,txt,mx,srv} are not affected, neither
-          is AnyEvent::Socket.
+6.01  Fri Aug 26 07:04:11 CEST 2011
+        - INCOMPATIBLE CHANGE: AnyEvent::DNS resource records now include
+          the TTL as fourth element - this affects ->resolve, ->request
+          and ->dns_unpack indirectly. Convenience functions such as
+          AnyEvent::DNS::{a,txt,mx,srv} are not affected, neither is
+          AnyEvent::Socket.
         - INCOMPATIBLE CHANGE: backend authors now should not implement
           one_event or loop, but instead the AnyEvent::CondVar::_wait and _poll
           methods.
+        - INCOMPATIBLE CHANGE: verbosity levels have been redefined, see
+          AnyEvent (PERL_ANYEVENT_VERBOSE) and AnyEvent::Log for details.
         - DEPRECIATION: please change
           "use AnyEvent::Impl::Perl" to "use AnyEvent::Loop" and
           "AnyEvent::Impl::Perl::loop" to "AnyEvent::Loop::run"
@@ -28,11 +24,22 @@ TODO: logging?
           for too long domain names explicitly and passes an undef to the callback
           instead (reported by James Bromberger).
         - make AnyEvent::Util more robust against EINTR (analyzed by Andrew Suffield).
-        - new function: AnyEvent::postpone.
+        - new functions: AnyEvent::postpone, AnyEvent::log.
+        - new module: AnyEvent::Log, for simple logging needs.
+        - new env variable, PERL_ANYEVENT_LOG, for fine-grained logging config.
         - new env variable, PERL_ANYEVENT_DEBUG_SHELL, to automatically start
           a debug shell.
         - new env variable, PERL_ANYEVENT_DEBUG_WRAP, to automatically enable
           watcher instrumentation/wrapping (see AnyEvent::Debug::wrap).
+        - new env variable, PERL_ANYEVENT_HOSTS, to override the place where
+          F</etc/hosts> can be found.
+        - an empty PERL_ANYEVENT_RESOLV_CONF now selects the default
+          configuration.
+        - env variables can now be specified using AE_xyz instead of
+          PERL_ANYEVENT_xyz, subject to some rules.
+        - lots of new AnyEvent::Debug functionality.
+        - AnyEvent::Strict now checks for modifications $_ by the callback
+          (by setting it to readonly while executing the callback, if possible).
         - IO::Async sometimes cancels the wrong timer when you call cancel_timer.
           Invest extra overhead to work around this peculiar behaviour.
         - split the pure perl backend into a loop module and an impl
@@ -40,6 +47,8 @@ TODO: logging?
         - some read types (regex, netstring, json, storable) could
           errornously keep an AE::Handle object alive on their own
           (reported by Mohammad Toossi).
+        - AnyEvent::Socket::resolve_sockaddr and all functions using it now
+          supports /etc/hosts overrides.
         - add more workarounds around child watcher bugs in IO::Async
           and (newly introduced) in POE.
         - use glib child watchers and try to work around its limitations,
@@ -57,6 +66,15 @@ TODO: logging?
         - add t/80_ssltext.t.
         - no longer use AUTOLOAD for the initial loading (for no very good reason).
         - tcp_server now tries to unlink unix domain sockets when it gets destroyed.
+        - do not run event loop detection multiple times when programs call their cached
+          copies of AnyEvent::detect.
+        - parse_hostport now accepts absolute paths als unix domain sockets.
+        - suppress the idiotic warning inside POE by patching the POE::Kernel
+          run flags instead of asking the user to jump through contortions.
+        - add Task::Weaken as dependency (as recommends only at this time).
+        - replace PF_UNSPEC by 0, for good old minix.
+
+6.0 (not officially released, but was on CPAN for about 15 minutes :/)
 
 5.34  Thu May 12 09:59:41 CEST 2011
 	- AE::TLS didn't support both cert_file and key at the same time,

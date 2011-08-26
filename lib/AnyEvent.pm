@@ -2,8 +2,8 @@
 
 AnyEvent - the DBI of event loop programming
 
-EV, Event, Glib, Tk, Perl, Event::Lib, Irssi, rxvt-unicode, IO::Async, Qt
-and POE are various supported event loops/environments.
+EV, Event, Glib, Tk, Perl, Event::Lib, Irssi, rxvt-unicode, IO::Async, Qt,
+FLTK and POE are various supported event loops/environments.
 
 =head1 SYNOPSIS
 
@@ -1051,6 +1051,22 @@ It should use C<postpone>:
    AnyEvent::postpone { $cb->(undef) }, return # signal error to callback, later
       if $some_error_condition;
 
+=item AnyEvent::log $level, $msg[, @args]
+
+Log the given C<$msg> at the given C<$level>.
+
+If L<AnyEvent::Log> is not loaded then this function makes a simple test
+to see whether the message will be logged. If the test succeeds it will
+load AnyEvent::Log and call C<AnyEvent::Log::log> - consequently, look at
+the L<AnyEvent::Log> documentation for details.
+
+If the test fails it will simply return.
+
+If you want to sprinkle loads of logging calls around your code, consider
+creating a logger callback with the C<AnyEvent::Log::logger> function,
+which can reduce typing, codesize and can reduce the logging overhead
+enourmously.
+
 =back
 
 =head1 WHAT TO DO IN A MODULE
@@ -1116,9 +1132,12 @@ exit cleanly.
 =head1 OTHER MODULES
 
 The following is a non-exhaustive list of additional modules that use
-AnyEvent as a client and can therefore be mixed easily with other AnyEvent
-modules and other event loops in the same program. Some of the modules
-come as part of AnyEvent, the others are available via CPAN.
+AnyEvent as a client and can therefore be mixed easily with other
+AnyEvent modules and other event loops in the same program. Some of the
+modules come as part of AnyEvent, the others are available via CPAN (see
+L<http://search.cpan.org/search?m=module&q=anyevent%3A%3A*> for
+a longer non-exhaustive list), and the list is heavily biased towards
+modules of the AnyEvent author himself :)
 
 =over 4
 
@@ -1149,34 +1168,30 @@ Implement event-based interfaces to the protocols of the same name (for
 the curious, IGS is the International Go Server and FCP is the Freenet
 Client Protocol).
 
-=item L<AnyEvent::Handle::UDP>
-
-Here be danger!
-
-As Pauli would put it, "Not only is it not right, it's not even wrong!" -
-there are so many things wrong with AnyEvent::Handle::UDP, most notably
-its use of a stream-based API with a protocol that isn't streamable, that
-the only way to improve it is to delete it.
-
-It features data corruption (but typically only under load) and general
-confusion. On top, the author is not only clueless about UDP but also
-fact-resistant - some gems of his understanding: "connect doesn't work
-with UDP", "UDP packets are not IP packets", "UDP only has datagrams, not
-packets", "I don't need to implement proper error checking as UDP doesn't
-support error checking" and so on - he doesn't even understand what's
-wrong with his module when it is explained to him.
-
-=item L<AnyEvent::DBI>
-
-Executes L<DBI> requests asynchronously in a proxy process for you,
-notifying you in an event-based way when the operation is finished.
-
 =item L<AnyEvent::AIO>
 
 Truly asynchronous (as opposed to non-blocking) I/O, should be in the
 toolbox of every event programmer. AnyEvent::AIO transparently fuses
 L<IO::AIO> and AnyEvent together, giving AnyEvent access to event-based
 file I/O, and much more.
+
+=item L<AnyEvent::Filesys::Notify>
+
+AnyEvent is good for non-blocking stuff, but it can't detect file or
+path changes (e.g. "watch this directory for new files", "watch this
+file for changes"). The L<AnyEvent::Filesys::Notify> module promises to
+do just that in a portbale fashion, supporting inotify on GNU/Linux and
+some weird, without doubt broken, stuff on OS X to monitor files. It can
+fall back to blocking scans at regular intervals transparently on other
+platforms, so it's about as portable as it gets.
+
+(I haven't used it myself, but I haven't heard anybody complaining about
+it yet).
+
+=item L<AnyEvent::DBI>
+
+Executes L<DBI> requests asynchronously in a proxy process for you,
+notifying you in an event-based way when the operation is finished.
 
 =item L<AnyEvent::HTTPD>
 
@@ -1188,7 +1203,19 @@ The fastest ping in the west.
 
 =item L<Coro>
 
-Has special support for AnyEvent via L<Coro::AnyEvent>.
+Has special support for AnyEvent via L<Coro::AnyEvent>, which allows you
+to simply invert the flow control - don't call us, we will call you:
+
+   async {
+      Coro::AnyEvent::sleep 5; # creates a 5s timer and waits for it
+      print "5 seconds later!\n";
+
+      Coro::AnyEvent::readable *STDIN; # uses an I/O watcher
+      my $line = <STDIN>; # works for ttys
+
+      AnyEvent::HTTP::http_get "url", Coro::rouse_cb;
+      my ($body, $hdr) = Coro::rouse_wait;
+   };
 
 =back
 
@@ -1208,7 +1235,7 @@ BEGIN { AnyEvent::common_sense }
 
 use Carp ();
 
-our $VERSION = '6.0';
+our $VERSION = '6.01';
 our $MODEL;
 
 our @ISA;
@@ -1225,8 +1252,13 @@ BEGIN {
    delete @ENV{grep /^PERL_ANYEVENT_/, keys %ENV}
       if ${^TAINT};
 
-   $VERBOSE = $ENV{PERL_ANYEVENT_VERBOSE}*1;
+   $ENV{"PERL_ANYEVENT_$_"} = $ENV{"AE_$_"}
+      for grep s/^AE_// && !exists $ENV{"PERL_ANYEVENT_$_"}, keys %ENV;
 
+   @ENV{grep /^PERL_ANYEVENT_/, keys %ENV} = ()
+      if ${^TAINT};
+
+   $VERBOSE = $ENV{PERL_ANYEVENT_VERBOSE}*1;
 }
 
 our $MAX_SIGNAL_LATENCY = 10;
@@ -1274,6 +1306,21 @@ sub postpone(&) {
    ()
 }
 
+sub log($$;@) {
+   # only load the big bloated module when we actually are about to log something
+   if ($_[0] <= $VERBOSE) { # also catches non-numeric levels(!)
+      require AnyEvent::Log;
+      # AnyEvent::Log overwrites this function
+      goto &log;
+   }
+
+   0 # not logged
+}
+
+if (length $ENV{PERL_ANYEVENT_LOG}) {
+   require AnyEvent::Log; # AnyEvent::Log does the thing for us
+}
+
 our @models = (
    [EV::                   => AnyEvent::Impl::EV::   , 1],
    [AnyEvent::Loop::       => AnyEvent::Impl::Perl:: , 1],
@@ -1294,11 +1341,34 @@ our @models = (
    [FLTK::                 => AnyEvent::Impl::FLTK2::],
 );
 
+our @isa_hook;
+
+sub _isa_set {
+   my @pkg = ("AnyEvent", (map $_->[0], grep defined, @isa_hook), $MODEL);
+
+   @{"$pkg[$_-1]::ISA"} = $pkg[$_]
+      for 1 .. $#pkg;
+
+   grep $_ && $_->[1], @isa_hook
+      and AE::_reset ();
+}
+
+# used for hooking AnyEvent::Strict and AnyEvent::Debug::Wrap into the class hierarchy
+sub _isa_hook($$;$) {
+   my ($i, $pkg, $reset_ae) = @_;
+
+   $isa_hook[$i] = $pkg ? [$pkg, $reset_ae] : undef;
+
+   _isa_set;
+}
+
 # all autoloaded methods reserve the complete glob, not just the method slot.
 # due to bugs in perls method cache implementation.
 our @methods = qw(io timer time now now_update signal child idle condvar);
 
 sub detect() {
+   return $MODEL if $MODEL; # some programs keep references to detect
+
    local $!; # for good measure
    local $SIG{__DIE__}; # we use eval
 
@@ -1316,10 +1386,10 @@ sub detect() {
       my $model = $1;
       $model = "AnyEvent::Impl::$model" unless $model =~ s/::$//;
       if (eval "require $model") {
+         AnyEvent::log 7 => "loaded model '$model' (forced by \$ENV{PERL_ANYEVENT_MODEL}), using it.";
          $MODEL = $model;
-         warn "AnyEvent: loaded model '$model' (forced by \$ENV{PERL_ANYEVENT_MODEL}), using it.\n" if $VERBOSE >= 2;
       } else {
-         warn "AnyEvent: unable to load model '$model' (from \$ENV{PERL_ANYEVENT_MODEL}):\n$@" if $VERBOSE;
+         AnyEvent::log 5 => "unable to load model '$model' (from \$ENV{PERL_ANYEVENT_MODEL}):\n$@";
       }
    }
 
@@ -1329,8 +1399,8 @@ sub detect() {
          my ($package, $model) = @$_;
          if (${"$package\::VERSION"} > 0) {
             if (eval "require $model") {
+               AnyEvent::log 7 => "autodetected model '$model', using it.";
                $MODEL = $model;
-               warn "AnyEvent: autodetected model '$model', using it.\n" if $VERBOSE >= 2;
                last;
             }
          }
@@ -1346,14 +1416,14 @@ sub detect() {
                and ${"$package\::VERSION"} > 0
                and eval "require $model"
             ) {
+               AnyEvent::log 7 => "autoloaded model '$model', using it.";
                $MODEL = $model;
-               warn "AnyEvent: autoloaded model '$model', using it.\n" if $VERBOSE >= 2;
                last;
             }
          }
 
          $MODEL
-           or die "AnyEvent: backend autodetection failed - did you properly install AnyEvent?\n";
+           or die "AnyEvent: backend autodetection failed - did you properly install AnyEvent?";
       }
    }
 
@@ -1362,7 +1432,6 @@ sub detect() {
    undef @REGISTRY;
 
    push @{"$MODEL\::ISA"}, "AnyEvent::Base";
-   unshift @ISA, $MODEL;
 
    # now nuke some methods that are overridden by the backend.
    # SUPER usage is not allowed in these.
@@ -1370,6 +1439,10 @@ sub detect() {
       undef &{"AnyEvent::Base::$_"}
          if defined &{"$MODEL\::$_"};
    }
+
+   _isa_set;
+
+   # we're officially open!
 
    if ($ENV{PERL_ANYEVENT_STRICT}) {
       require AnyEvent::Strict;
@@ -1380,7 +1453,7 @@ sub detect() {
       AnyEvent::Debug::wrap ($ENV{PERL_ANYEVENT_DEBUG_WRAP});
    }
 
-   if (exists $ENV{PERL_ANYEVENT_DEBUG_SHELL}) {
+   if (length $ENV{PERL_ANYEVENT_DEBUG_SHELL}) {
       require AnyEvent::Socket;
       require AnyEvent::Debug;
 
@@ -1390,6 +1463,9 @@ sub detect() {
       my ($host, $service) = AnyEvent::Socket::parse_hostport ($shell);
       $AnyEvent::Debug::SHELL = AnyEvent::Debug::shell ($host, $service);
    }
+
+   # now the anyevent environment is set up as the user told us to, so
+   # call the actual user code - post detects
 
    (shift @post_detect)->() while @post_detect;
    undef @post_detect;
@@ -1486,6 +1562,7 @@ sub _reset() {
       }
 
       *postpone = \&AnyEvent::postpone;
+      *log      = \&AnyEvent::log;
    };
    die if $@;
 }
@@ -1500,15 +1577,17 @@ sub time {
    eval q{ # poor man's autoloading {}
       # probe for availability of Time::HiRes
       if (eval "use Time::HiRes (); Time::HiRes::time (); 1") {
-         warn "AnyEvent: using Time::HiRes for sub-second timing accuracy.\n" if $VERBOSE >= 8;
-         *AE::time = \&Time::HiRes::time;
+         *time     = sub { Time::HiRes::time () };
+         *AE::time = \&    Time::HiRes::time     ;
+         *now      = \&time;
+         AnyEvent::log 8 => "AnyEvent: using Time::HiRes for sub-second timing accuracy.";
          # if (eval "use POSIX (); (POSIX::times())...
       } else {
-         warn "AnyEvent: using built-in time(), WARNING, no sub-second resolution!\n" if $VERBOSE;
-         *AE::time = sub (){ time }; # epic fail
+         *time     = sub   { CORE::time };
+         *AE::time = sub (){ CORE::time };
+         *now      = \&time;
+         AnyEvent::log 3 => "using built-in time(), WARNING, no sub-second resolution!";
       }
-
-      *time = sub { AE::time }; # different prototypes
    };
    die if $@;
 
@@ -1516,7 +1595,6 @@ sub time {
 }
 
 *now = \&time;
-
 sub now_update { }
 
 sub _poll {
@@ -1612,13 +1690,13 @@ sub signal {
    eval q{ # poor man's autoloading {}
       # probe for availability of Async::Interrupt 
       if (_have_async_interrupt) {
-         warn "AnyEvent: using Async::Interrupt for race-free signal handling.\n" if $VERBOSE >= 8;
+         AnyEvent::log 8 => "using Async::Interrupt for race-free signal handling.";
 
          $SIGPIPE_R = new Async::Interrupt::EventPipe;
          $SIG_IO = AE::io $SIGPIPE_R->fileno, 0, \&_signal_exec;
 
       } else {
-         warn "AnyEvent: using emulated perl signal handling with latency timer.\n" if $VERBOSE >= 8;
+         AnyEvent::log 8 => "using emulated perl signal handling with latency timer.";
 
          if (AnyEvent::WIN32) {
             require AnyEvent::Util;
@@ -1922,12 +2000,43 @@ so on.
 
 =head1 ENVIRONMENT VARIABLES
 
-The following environment variables are used by this module or its
-submodules.
+AnyEvent supports a number of environment variables that tune the
+runtime behaviour. They are usually evaluated when AnyEvent is
+loaded, initialised, or a submodule that uses them is loaded. Many of
+them also cause AnyEvent to load additional modules - for example,
+C<PERL_ANYEVENT_DEBUG_WRAP> causes the L<AnyEvent::Debug> module to be
+loaded.
 
-Note that AnyEvent will remove I<all> environment variables starting with
-C<PERL_ANYEVENT_> from C<%ENV> when it is loaded while taint mode is
-enabled.
+All the environment variables documented here start with
+C<PERL_ANYEVENT_>, which is what AnyEvent considers its own
+namespace. Other modules are encouraged (but by no means required) to use
+C<PERL_ANYEVENT_SUBMODULE> if they have registered the AnyEvent::Submodule
+namespace on CPAN, for any submodule. For example, L<AnyEvent::HTTP> could
+be expected to use C<PERL_ANYEVENT_HTTP_PROXY> (it should not access env
+variables starting with C<AE_>, see below).
+
+All variables can also be set via the C<AE_> prefix, that is, instead
+of setting C<PERL_ANYEVENT_VERBOSE> you can also set C<AE_VERBOSE>. In
+case there is a clash btween anyevent and another program that uses
+C<AE_something> you can set the corresponding C<PERL_ANYEVENT_something>
+variable to the empty string, as those variables take precedence.
+
+When AnyEvent is first loaded, it copies all C<AE_xxx> env variables
+to their C<PERL_ANYEVENT_xxx> counterpart unless that variable already
+exists. If taint mode is on, then AnyEvent will remove I<all> environment
+variables starting with C<PERL_ANYEVENT_> from C<%ENV> (or replace them
+with C<undef> or the empty string, if the corresaponding C<AE_> variable
+is set).
+
+The exact algorithm is currently:
+
+   1. if taint mode enabled, delete all PERL_ANYEVENT_xyz variables from %ENV
+   2. copy over AE_xyz to PERL_ANYEVENT_xyz unless the latter alraedy exists
+   3. if taint mode enabled, set all PERL_ANYEVENT_xyz variables to undef.
+
+This ensures that child processes will not see the C<AE_> variables.
+
+The following environment variables are currently known to AnyEvent:
 
 =over 4
 
@@ -1935,17 +2044,38 @@ enabled.
 
 By default, AnyEvent will be completely silent except in fatal
 conditions. You can set this environment variable to make AnyEvent more
-talkative.
+talkative. If you want to do more than just set the global logging level
+you should have a look at C<PERL_ANYEVENT_LOG>, which allows much more
+complex specifications.
 
-When set to C<1> or higher, causes AnyEvent to warn about unexpected
+When set to C<5> or higher (warn), causes AnyEvent to warn about unexpected
 conditions, such as not being able to load the event model specified by
-C<PERL_ANYEVENT_MODEL>.
+C<PERL_ANYEVENT_MODEL>, or a guard callback throwing an exception - this
+is the minimum recommended level.
 
-When set to C<2> or higher, cause AnyEvent to report to STDERR which event
-model it chooses.
+When set to C<7> or higher (info), cause AnyEvent to report which event model it
+chooses.
 
-When set to C<8> or higher, then AnyEvent will report extra information on
+When set to C<8> or higher (debug), then AnyEvent will report extra information on
 which optional modules it loads and how it implements certain features.
+
+=item C<PERL_ANYEVENT_LOG>
+
+Accepts rather complex logging specifications. For example, you could log
+all C<debug> messages of some module to stderr, warnings and above to
+stderr, and errors and above to syslog, with:
+
+   PERL_ANYEVENT_LOG=Some::Module=debug,+log:filter=warn,+%syslog:%syslog=error,syslog
+
+For the rather extensive details, see L<AnyEvent::Log>.
+
+This variable is evaluated when AnyEvent (or L<AnyEvent::Log>) is loaded,
+so will take effect even before AnyEvent has initialised itself.
+
+Note that specifying this environment variable causes the L<AnyEvent::Log>
+module to be loaded, while C<PERL_ANYEVENT_VERBOSE> does not, so only
+using the latter saves a few hundred kB of memory until the first message
+is being logged.
 
 =item C<PERL_ANYEVENT_STRICT>
 
@@ -1969,12 +2099,12 @@ C<AnyEvent::Socket::parse_hostport> (after replacing every occurance of
 C<$$> by the process pid) and an C<AnyEvent::Debug::shell> is bound on
 that port. The shell object is saved in C<$AnyEvent::Debug::SHELL>.
 
-This takes place when the first watcher is created.
+This happens when the first watcher is created.
 
 For example, to bind a debug shell on a unix domain socket in
 F<< /tmp/debug<pid>.sock >>, you could use this:
 
-   PERL_ANYEVENT_DEBUG_SHELL=unix/:/tmp/debug\$\$.sock perlprog
+   PERL_ANYEVENT_DEBUG_SHELL=/tmp/debug\$\$.sock perlprog
 
 Note that creating sockets in F</tmp> is very unsafe on multiuser
 systems.
@@ -2025,12 +2155,18 @@ but support both and try to use both.  C<PERL_ANYEVENT_PROTOCOLS=ipv4>
 addresses. C<PERL_ANYEVENT_PROTOCOLS=ipv6,ipv4> support either IPv4 or
 IPv6, but prefer IPv6 over IPv4.
 
+=item C<PERL_ANYEVENT_HOSTS>
+
+This variable, if specified, overrides the F</etc/hosts> file used by
+L<AnyEvent::Socket>C<::resolve_sockaddr>, i.e. hosts aliases will be read
+from that file instead.
+
 =item C<PERL_ANYEVENT_EDNS0>
 
-Used by L<AnyEvent::DNS> to decide whether to use the EDNS0 extension
-for DNS. This extension is generally useful to reduce DNS traffic, but
-some (broken) firewalls drop such DNS packets, which is why it is off by
-default.
+Used by L<AnyEvent::DNS> to decide whether to use the EDNS0 extension for
+DNS. This extension is generally useful to reduce DNS traffic, especially
+when DNSSEC is involved, but some (broken) firewalls drop such DNS
+packets, which is why it is off by default.
 
 Setting this variable to C<1> will cause L<AnyEvent::DNS> to announce
 EDNS0 in its DNS requests.
@@ -2048,16 +2184,16 @@ sent to the DNS server.
 
 =item C<PERL_ANYEVENT_RESOLV_CONF>
 
-The file to use instead of F</etc/resolv.conf> (or OS-specific
-configuration) in the default resolver. When set to the empty string, no
-default config will be used.
+The absolute path to a F<resolv.conf>-style file to use instead of
+F</etc/resolv.conf> (or the OS-specific configuration) in the default
+resolver, or the empty string to select the default configuration.
 
 =item C<PERL_ANYEVENT_CA_FILE>, C<PERL_ANYEVENT_CA_PATH>.
 
 When neither C<ca_file> nor C<ca_path> was specified during
 L<AnyEvent::TLS> context creation, and either of these environment
-variables exist, they will be used to specify CA certificate locations
-instead of a system-dependent default.
+variables are nonempty, they will be used to specify CA certificate
+locations instead of a system-dependent default.
 
 =item C<PERL_ANYEVENT_AVOID_GUARD> and C<PERL_ANYEVENT_AVOID_ASYNC_INTERRUPT>
 
@@ -2399,7 +2535,7 @@ performance with or without AnyEvent.
 
 =item * The overhead AnyEvent adds is usually much smaller than the overhead of
 the actual event loop, only with extremely fast event loops such as EV
-adds AnyEvent significant overhead.
+does AnyEvent add significant overhead.
 
 =item * You should avoid POE like the plague if you want performance or
 reasonable memory usage.
@@ -2784,17 +2920,23 @@ Tutorial/Introduction: L<AnyEvent::Intro>.
 
 FAQ: L<AnyEvent::FAQ>.
 
-Utility functions: L<AnyEvent::Util>.
+Utility functions: L<AnyEvent::Util> (misc. grab-bag), L<AnyEvent::Log>
+(simply logging).
 
-Event modules: L<AnyEvent::Loop>, L<EV>, L<EV::Glib>, L<Glib::EV>,
-L<Event>, L<Glib::Event>, L<Glib>, L<Tk>, L<Event::Lib>, L<Qt>, L<POE>.
+Development/Debugging: L<AnyEvent::Strict> (stricter checking),
+L<AnyEvent::Debug> (interactive shell, watcher tracing).
+
+Supported event modules: L<AnyEvent::Loop>, L<EV>, L<EV::Glib>,
+L<Glib::EV>, L<Event>, L<Glib::Event>, L<Glib>, L<Tk>, L<Event::Lib>,
+L<Qt>, L<POE>, L<FLTK>.
 
 Implementations: L<AnyEvent::Impl::EV>, L<AnyEvent::Impl::Event>,
 L<AnyEvent::Impl::Glib>, L<AnyEvent::Impl::Tk>, L<AnyEvent::Impl::Perl>,
 L<AnyEvent::Impl::EventLib>, L<AnyEvent::Impl::Qt>,
-L<AnyEvent::Impl::POE>, L<AnyEvent::Impl::IOAsync>, L<Anyevent::Impl::Irssi>.
+L<AnyEvent::Impl::POE>, L<AnyEvent::Impl::IOAsync>, L<Anyevent::Impl::Irssi>,
+L<AnyEvent::Impl::FLTK>.
 
-Non-blocking file handles, sockets, TCP clients and
+Non-blocking handles, pipes, stream sockets, TCP clients and
 servers: L<AnyEvent::Handle>, L<AnyEvent::Socket>, L<AnyEvent::TLS>.
 
 Asynchronous DNS: L<AnyEvent::DNS>.
