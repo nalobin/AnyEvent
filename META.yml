@@ -1,28 +1,29 @@
---- #YAML:1.0
-name:               AnyEvent
-version:            6.02
-abstract:           ~
-author:  []
-license:            unknown
-distribution_type:  module
-configure_requires:
-    ExtUtils::MakeMaker:  0
+---
+abstract: unknown
+author:
+  - unknown
 build_requires:
-    ExtUtils::MakeMaker:  0
-requires:  {}
-no_index:
-    directory:
-        - t
-        - inc
-generated_by:       ExtUtils::MakeMaker version 6.56
+  ExtUtils::MakeMaker: 0
+configure_requires:
+  ExtUtils::MakeMaker: 0
+dynamic_config: 1
+generated_by: 'ExtUtils::MakeMaker version 6.59, CPAN::Meta::Converter version 2.112150'
+license: unknown
 meta-spec:
-    url:      http://module-build.sourceforge.net/META-spec-v1.4.html
-    version:  1.4
+  url: http://module-build.sourceforge.net/META-spec-v1.4.html
+  version: 1.4
+name: AnyEvent
+no_index:
+  directory:
+    - t
+    - inc
 recommends:
-    Async::Interrupt:  1
-    EV:                4
-    Guard:             1.02
-    JSON:              2.09
-    JSON::XS:          2.2
-    Net::SSLeay:       1.33
-    Task::Weaken:      0
+  Async::Interrupt: 1
+  EV: 4
+  Guard: 1.02
+  JSON: 2.09
+  JSON::XS: 2.2
+  Net::SSLeay: 1.33
+  Task::Weaken: 0
+requires: {}
+version: 6.1

@@ -284,7 +284,7 @@ full backtrace of the location the watcher was created, which slows down
 watcher creation considerably.
 
 Every wrapped watcher will be linked into C<%AnyEvent::Debug::Wrapped>,
-with its address as key. The C<wl> command in the debug shell cna be used
+with its address as key. The C<wl> command in the debug shell can be used
 to list watchers.
 
 Instrumenting can increase the size of each watcher multiple times, and,
@@ -323,7 +323,7 @@ sub wrap(;$) {
 
          (my $level, $WRAP_LEVEL) = ($WRAP_LEVEL, undef);
 
-         require AnyEvent::Strict;
+         require AnyEvent::Strict unless $AnyEvent::Strict::VERSION;
 
          AnyEvent::post_detect { # make sure we run after AnyEvent::Strict
             wrap ($level);
@@ -412,7 +412,7 @@ sub sv2str($) {
 
 Creates a backtrace (actually an AnyEvent::Debug::Backtrace object
 that you can stringify), not unlike the Carp module would. Unlike the
-Carp module it resolves some references (euch as callbacks) to more
+Carp module it resolves some references (such as callbacks) to more
 user-friendly strings, has a more succinct output format and most
 importantly: doesn't leak memory like hell.
 

@@ -124,4 +124,5 @@ t/69_ev_04_condvar.t
 t/69_ev_05_dns.t
 t/69_ev_07_io.t
 t/69_ev_09_multi.t
-META.yml                                 Module meta-data (added by MakeMaker)
+META.yml                                 Module YAML meta-data (added by MakeMaker)
+META.json                                Module JSON meta-data (added by MakeMaker)

@@ -13,7 +13,7 @@ AnyEvent::Handle - non-blocking I/O on streaming handles via AnyEvent
       fh => \*STDIN,
       on_error => sub {
          my ($hdl, $fatal, $msg) = @_;
-         AE::log warn => "got error $msg\n";
+         AE::log error => "got error $msg\n";
          $hdl->destroy;
          $cv->send;
       };
@@ -24,7 +24,7 @@ AnyEvent::Handle - non-blocking I/O on streaming handles via AnyEvent
    # read the response line
    $hdl->push_read (line => sub {
       my ($hdl, $line) = @_;
-      AE::log warn => "got line <$line>\n";
+      say "got line <$line>";
       $cv->send;
    });
 
@@ -1083,7 +1083,7 @@ handle. Uses the C<nfreeze> format.
 register_write_type storable => sub {
    my ($self, $ref) = @_;
 
-   require Storable;
+   require Storable unless $Storable::VERSION;
 
    pack "w/a*", Storable::nfreeze ($ref)
 };
@@ -1130,7 +1130,7 @@ Whenever the given C<type> is used, C<push_write> will the function with
 the handle object and the remaining arguments.
 
 The function is supposed to return a single octet string that will be
-appended to the write buffer, so you cna mentally treat this function as a
+appended to the write buffer, so you can mentally treat this function as a
 "arguments to on-the-wire-format" converter.
 
 Example: implement a custom write type C<join> that joins the remaining
@@ -1434,7 +1434,7 @@ data.
 Example: read 2 bytes.
 
    $handle->push_read (chunk => 2, sub {
-      AE::log debug => "yay " . unpack "H*", $_[1];
+      say "yay " . unpack "H*", $_[1];
    });
 
 =cut
@@ -1713,7 +1713,7 @@ Raises C<EBADMSG> error if the data could not be decoded.
 register_read_type storable => sub {
    my ($self, $cb) = @_;
 
-   require Storable;
+   require Storable unless $Storable::VERSION;
 
    sub {
       # when we can use 5.10 we can use ".", but for 5.8 we use the re-pack method
@@ -2206,7 +2206,7 @@ you have outstanding requests in your read queue, then an EOF is
 considered an error as you clearly expected some data.
 
 To avoid this, make sure you have an empty read queue whenever your handle
-is supposed to be "idle" (i.e. connection closes are O.K.). You cna set
+is supposed to be "idle" (i.e. connection closes are O.K.). You can set
 an C<on_read> handler that simply pushes the first read requests in the
 queue.
 
@@ -2247,7 +2247,7 @@ unexpectedly.
 
 The second variant is a protocol where the client can drop the connection
 at any time. For TCP, this means that the server machine may run out of
-sockets easier, and in general, it means you cnanot distinguish a protocl
+sockets easier, and in general, it means you cannot distinguish a protocl
 failure/client crash from a normal connection close. Nevertheless, these
 kinds of protocols are common (and sometimes even the best solution to the
 problem).

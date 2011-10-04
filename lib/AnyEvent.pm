@@ -417,9 +417,9 @@ pure perl implementation).
 
 =head3 Safe/Unsafe Signals
 
-Perl signals can be either "safe" (synchronous to opcode handling) or
-"unsafe" (asynchronous) - the former might get delayed indefinitely, the
-latter might corrupt your memory.
+Perl signals can be either "safe" (synchronous to opcode handling)
+or "unsafe" (asynchronous) - the former might delay signal delivery
+indefinitely, the latter might corrupt your memory.
 
 AnyEvent signal handlers are, in addition, synchronous to the event loop,
 i.e. they will not interrupt your running perl program but will only be
@@ -428,23 +428,21 @@ callbacks, too).
 
 =head3 Signal Races, Delays and Workarounds
 
-Many event loops (e.g. Glib, Tk, Qt, IO::Async) do not support attaching
-callbacks to signals in a generic way, which is a pity, as you cannot
-do race-free signal handling in perl, requiring C libraries for
-this. AnyEvent will try to do its best, which means in some cases,
-signals will be delayed. The maximum time a signal might be delayed is
-specified in C<$AnyEvent::MAX_SIGNAL_LATENCY> (default: 10 seconds). This
-variable can be changed only before the first signal watcher is created,
-and should be left alone otherwise. This variable determines how often
-AnyEvent polls for signals (in case a wake-up was missed). Higher values
-will cause fewer spurious wake-ups, which is better for power and CPU
-saving.
+Many event loops (e.g. Glib, Tk, Qt, IO::Async) do not support
+attaching callbacks to signals in a generic way, which is a pity,
+as you cannot do race-free signal handling in perl, requiring
+C libraries for this. AnyEvent will try to do its best, which
+means in some cases, signals will be delayed. The maximum time
+a signal might be delayed is 10 seconds by default, but can
+be overriden via C<$ENV{PERL_ANYEVENT_MAX_SIGNAL_LATENCY}> or
+C<$AnyEvent::MAX_SIGNAL_LATENCY> - see the Ö<ENVIRONMENT VARIABLES>
+section for details.
 
 All these problems can be avoided by installing the optional
 L<Async::Interrupt> module, which works with most event loops. It will not
 work with inherently broken event loops such as L<Event> or L<Event::Lib>
-(and not with L<POE> currently, as POE does its own workaround with
-one-second latency). For those, you just have to suffer the delays.
+(and not with L<POE> currently). For those, you just have to suffer the
+delays.
 
 =head2 CHILD PROCESS WATCHERS
 
@@ -1060,7 +1058,9 @@ to see whether the message will be logged. If the test succeeds it will
 load AnyEvent::Log and call C<AnyEvent::Log::log> - consequently, look at
 the L<AnyEvent::Log> documentation for details.
 
-If the test fails it will simply return.
+If the test fails it will simply return. Right now this happens when a
+numerical loglevel is used and it is larger than the level specified via
+C<$ENV{PERL_ANYEVENT_VERBOSE}>.
 
 If you want to sprinkle loads of logging calls around your code, consider
 creating a logger callback with the C<AnyEvent::Log::logger> function,
@@ -1235,14 +1235,13 @@ BEGIN { AnyEvent::common_sense }
 
 use Carp ();
 
-our $VERSION = '6.02';
+our $VERSION = '6.1';
 our $MODEL;
-
 our @ISA;
-
 our @REGISTRY;
-
 our $VERBOSE;
+our %PROTOCOL; # (ipv4|ipv6) => (1|2), higher numbers are preferred
+our $MAX_SIGNAL_LATENCY = $ENV{PERL_ANYEVENT_MAX_SIGNAL_LATENCY} || 10; # executes after the BEGIN block below (tainting!)
 
 BEGIN {
    require "AnyEvent/constants.pl";
@@ -1258,14 +1257,10 @@ BEGIN {
    @ENV{grep /^PERL_ANYEVENT_/, keys %ENV} = ()
       if ${^TAINT};
 
-   $VERBOSE = $ENV{PERL_ANYEVENT_VERBOSE}*1;
-}
+   # $ENV{PERL_ANYEVENT_xxx} now valid
 
-our $MAX_SIGNAL_LATENCY = 10;
+   $VERBOSE = length $ENV{PERL_ANYEVENT_VERBOSE} ? $ENV{PERL_ANYEVENT_VERBOSE}*1 : 4;
 
-our %PROTOCOL; # (ipv4|ipv6) => (1|2), higher numbers are preferred
-
-{
    my $idx;
    $PROTOCOL{$_} = ++$idx
       for reverse split /\s*,\s*/,
@@ -1308,8 +1303,9 @@ sub postpone(&) {
 
 sub log($$;@) {
    # only load the big bloated module when we actually are about to log something
-   if ($_[0] <= $VERBOSE) { # also catches non-numeric levels(!)
-      require AnyEvent::Log;
+   if ($_[0] <= ($VERBOSE || 1)) { # also catches non-numeric levels(!) and fatal
+      local ($!, $@);
+      require AnyEvent::Log; # among other things, sets $VERBOSE to 9
       # AnyEvent::Log overwrites this function
       goto &log;
    }
@@ -1317,20 +1313,48 @@ sub log($$;@) {
    0 # not logged
 }
 
+sub _logger($;$) {
+   my ($level, $renabled) = @_;
+
+   $$renabled = $level <= $VERBOSE;
+
+   my $logger = [(caller)[0], $level, $renabled];
+
+   $AnyEvent::Log::LOGGER{$logger+0} = $logger;
+
+#   return unless defined wantarray;
+# 
+#   require AnyEvent::Util;
+#   my $guard = AnyEvent::Util::guard (sub {
+#      # "clean up"
+#      delete $LOGGER{$logger+0};
+#   });
+# 
+#   sub {
+#      return 0 unless $$renabled;
+# 
+#      $guard if 0; # keep guard alive, but don't cause runtime overhead
+#      require AnyEvent::Log unless $AnyEvent::Log::VERSION;
+#      package AnyEvent::Log;
+#      _log ($logger->[0], $level, @_) # logger->[0] has been converted at load time
+#   }
+}
+
 if (length $ENV{PERL_ANYEVENT_LOG}) {
    require AnyEvent::Log; # AnyEvent::Log does the thing for us
 }
 
 our @models = (
-   [EV::                   => AnyEvent::Impl::EV::   , 1],
-   [AnyEvent::Loop::       => AnyEvent::Impl::Perl:: , 1],
+   [EV::                   => AnyEvent::Impl::EV::],
+   [AnyEvent::Loop::       => AnyEvent::Impl::Perl::],
    # everything below here will not (normally) be autoprobed
    # as the pure perl backend should work everywhere
    # and is usually faster
-   [Event::                => AnyEvent::Impl::Event::, 1],
-   [Glib::                 => AnyEvent::Impl::Glib:: , 1], # becomes extremely slow with many watchers
+   [Irssi::                => AnyEvent::Impl::Irssi::],    # Irssi has a bogus "Event" package, so msut be near the top
+   [Event::                => AnyEvent::Impl::Event::],    # slow, stable
+   [Glib::                 => AnyEvent::Impl::Glib::],     # becomes extremely slow with many watchers
+   # everything below here should not be autoloaded
    [Event::Lib::           => AnyEvent::Impl::EventLib::], # too buggy
-   [Irssi::                => AnyEvent::Impl::Irssi::],    # Irssi has a bogus "Event" package
    [Tk::                   => AnyEvent::Impl::Tk::],       # crashes with many handles
    [Qt::                   => AnyEvent::Impl::Qt::],       # requires special main program
    [POE::Kernel::          => AnyEvent::Impl::POE::],      # lasciate ogni speranza
@@ -1369,6 +1393,14 @@ our @methods = qw(io timer time now now_update signal child idle condvar);
 sub detect() {
    return $MODEL if $MODEL; # some programs keep references to detect
 
+   # IO::Async::Loop::AnyEvent is extremely evil, refuse to work with it
+   # the author knows about the problems and what it does to AnyEvent as a whole
+   # (and the ability of others to use AnyEvent), but simply wants to abuse AnyEvent
+   # anyway.
+   AnyEvent::log fatal => "AnyEvent: IO::Async::Loop::AnyEvent detected - this module is broken by design,\n"
+                          . "abuses internals and breaks AnyEvent, will not continue."
+      if exists $INC{"IO/Async/Loop/AnyEvent.pm"};
+
    local $!; # for good measure
    local $SIG{__DIE__}; # we use eval
 
@@ -1389,7 +1421,7 @@ sub detect() {
          AnyEvent::log 7 => "loaded model '$model' (forced by \$ENV{PERL_ANYEVENT_MODEL}), using it.";
          $MODEL = $model;
       } else {
-         AnyEvent::log 5 => "unable to load model '$model' (from \$ENV{PERL_ANYEVENT_MODEL}):\n$@";
+         AnyEvent::log 4 => "unable to load model '$model' (from \$ENV{PERL_ANYEVENT_MODEL}):\n$@";
       }
    }
 
@@ -1409,10 +1441,9 @@ sub detect() {
       unless ($MODEL) {
          # try to autoload a model
          for (@REGISTRY, @models) {
-            my ($package, $model, $autoload) = @$_;
+            my ($package, $model) = @$_;
             if (
-               $autoload
-               and eval "require $package"
+               eval "require $package"
                and ${"$package\::VERSION"} > 0
                and eval "require $model"
             ) {
@@ -1423,7 +1454,7 @@ sub detect() {
          }
 
          $MODEL
-           or die "AnyEvent: backend autodetection failed - did you properly install AnyEvent?";
+           or AnyEvent::log fatal => "AnyEvent: backend autodetection failed - did you properly install AnyEvent?";
       }
    }
 
@@ -2042,16 +2073,22 @@ The following environment variables are currently known to AnyEvent:
 
 =item C<PERL_ANYEVENT_VERBOSE>
 
-By default, AnyEvent will be completely silent except in fatal
-conditions. You can set this environment variable to make AnyEvent more
-talkative. If you want to do more than just set the global logging level
+By default, AnyEvent will only log messages with loglevel C<3>
+(C<critical>) or higher (see L<AnyEvent::Log>). You can set this
+environment variable to a numerical loglevel to make AnyEvent more (or
+less) talkative.
+
+If you want to do more than just set the global logging level
 you should have a look at C<PERL_ANYEVENT_LOG>, which allows much more
 complex specifications.
 
-When set to C<5> or higher (warn), causes AnyEvent to warn about unexpected
-conditions, such as not being able to load the event model specified by
-C<PERL_ANYEVENT_MODEL>, or a guard callback throwing an exception - this
-is the minimum recommended level.
+When set to C<0> (C<off>), then no messages whatsoever will be logged with
+the default logging settings.
+
+When set to C<5> or higher (C<warn>), causes AnyEvent to warn about
+unexpected conditions, such as not being able to load the event model
+specified by C<PERL_ANYEVENT_MODEL>, or a guard callback throwing an
+exception - this is the minimum recommended level.
 
 When set to C<7> or higher (info), cause AnyEvent to report which event model it
 chooses.
@@ -2094,10 +2131,10 @@ can be very useful, however.
 
 =item C<PERL_ANYEVENT_DEBUG_SHELL>
 
-If this env variable is set, then its contents will be interpreted by
-C<AnyEvent::Socket::parse_hostport> (after replacing every occurance of
-C<$$> by the process pid) and an C<AnyEvent::Debug::shell> is bound on
-that port. The shell object is saved in C<$AnyEvent::Debug::SHELL>.
+If this env variable is nonempty, then its contents will be interpreted by
+C<AnyEvent::Socket::parse_hostport> and C<AnyEvent::Debug::shell> (after
+replacing every occurance of C<$$> by the process pid). The shell object
+is saved in C<$AnyEvent::Debug::SHELL>.
 
 This happens when the first watcher is created.
 
@@ -2105,9 +2142,15 @@ For example, to bind a debug shell on a unix domain socket in
 F<< /tmp/debug<pid>.sock >>, you could use this:
 
    PERL_ANYEVENT_DEBUG_SHELL=/tmp/debug\$\$.sock perlprog
+   # connect with e.g.: socat readline /tmp/debug123.sock
 
-Note that creating sockets in F</tmp> is very unsafe on multiuser
-systems.
+Or to bind to tcp port 4545 on localhost:
+
+   PERL_ANYEVENT_DEBUG_SHELL=127.0.0.1:4545 perlprog
+   # connect with e.g.: telnet localhost 4545
+
+Note that creating sockets in F</tmp> or on localhost is very unsafe on
+multiuser systems.
 
 =item C<PERL_ANYEVENT_DEBUG_WRAP>
 
@@ -2181,6 +2224,28 @@ will create in parallel.
 The default value for the C<max_outstanding> parameter for the default DNS
 resolver - this is the maximum number of parallel DNS requests that are
 sent to the DNS server.
+
+=item C<PERL_ANYEVENT_MAX_SIGNAL_LATENCY>
+
+Perl has inherently racy signal handling (you can basically choose between
+losing signals and memory corruption) - pure perl event loops (including
+C<AnyEvent::Loop>, when C<Async::Interrupt> isn't available) therefore
+have to poll regularly to avoid losing signals.
+
+Some event loops are racy, but don't poll regularly, and some event loops
+are written in C but are still racy. For those event loops, AnyEvent
+installs a timer that regularly wakes up the event loop.
+
+By default, the interval for this timer is C<10> seconds, but you can
+override this delay with this environment variable (or by setting
+the C<$AnyEvent::MAX_SIGNAL_LATENCY> variable before creating signal
+watchers).
+
+Lower values increase CPU (and energy) usage, higher values can introduce
+long delays when reaping children or waiting for signals.
+
+The L<AnyEvent::Async> module, if available, will be used to avoid this
+polling (with most event loops).
 
 =item C<PERL_ANYEVENT_RESOLV_CONF>
 

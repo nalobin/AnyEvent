@@ -25,6 +25,8 @@ L<AnyEvent>). However, this module can be loaded manually at any time.
 package AnyEvent::Strict;
 
 use Carp qw(croak);
+use Errno ();
+use POSIX ();
 
 use AnyEvent (); BEGIN { AnyEvent::common_sense }
 
@@ -37,9 +39,9 @@ BEGIN {
          my $cb = shift;
 
          sub {
+            local $_;
             Internals::SvREADONLY $_, 1;
             &$cb;
-            Internals::SvREADONLY $_, 0;
          }
       };
    } else {
@@ -63,34 +65,68 @@ BEGIN {
    }
 }
 
+our (@FD_INUSE, $FD_I);
+our $FD_CHECK_W = AE::timer 4, 4, sub {
+   my $cnt = (@FD_INUSE < 100 * 10 ? int @FD_INUSE * 0.1 : 100) || 10;
+
+   if ($FD_I <= 0) {
+      #pop @FD_INUSE while @FD_INUSE && !$FD_INUSE[-1];
+      $FD_I = @FD_INUSE
+         or return; # empty
+   }
+
+   $cnt = $FD_I if $cnt > $FD_I;
+
+   eval {
+      do {
+         !$FD_INUSE[--$FD_I]
+            or (POSIX::lseek $FD_I, 0, 1) != -1
+            or $! != Errno::EBADF
+            or die;
+      } while --$cnt;
+      1
+   } or AE::log crit => "file descriptor $FD_I registered with AnyEvent but prematurely closed, event loop might malfunction.\n";
+};
+
 sub io {
    my $class = shift;
-   my %arg = @_;
+   my (%arg, $fh, $cb, $fd) = @_;
 
    ref $arg{cb}
       or croak "AnyEvent->io called with illegal cb argument '$arg{cb}'";
-   my $cb = wrap delete $arg{cb};
+   $cb = wrap delete $arg{cb};
  
    $arg{poll} =~ /^[rw]$/
       or croak "AnyEvent->io called with illegal poll argument '$arg{poll}'";
 
-   if ($arg{fh} =~ /^\s*\d+\s*$/) {
-      $arg{fh} = AnyEvent::_dupfh $arg{poll}, $arg{fh};
+   $fh = delete $arg{fh};
+
+   if ($fh =~ /^\s*\d+\s*$/) {
+      $fd = $fh;
+      $fh = AnyEvent::_dupfh $arg{poll}, $fh;
    } else {
-      defined eval { fileno $arg{fh} }
-         or croak "AnyEvent->io called with illegal fh argument '$arg{fh}'";
+      defined eval { $fd = fileno $fh }
+         or croak "AnyEvent->io called with illegal fh argument '$fh'";
    }
 
-   -f $arg{fh}
+   -f $fh
       and croak "AnyEvent->io called with fh argument pointing to a file";
 
    delete $arg{poll};
-   delete $arg{fh};
  
    croak "AnyEvent->io called with unsupported parameter(s) " . join ", ", keys %arg
       if keys %arg;
 
-   $class->SUPER::io (@_, cb => $cb)
+   ++$FD_INUSE[$fd];
+
+   bless [
+      $fd,
+      $class->SUPER::io (@_, cb => $cb)
+   ], "AnyEvent::Strict::io";
+}
+
+sub AnyEvent::Strict::io::DESTROY {
+   --$FD_INUSE[$_[0][0]];
 }
 
 sub timer {

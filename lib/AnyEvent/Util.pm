@@ -223,8 +223,8 @@ my @fork_queue;
 
 sub _fork_schedule;
 sub _fork_schedule {
-   require Storable;
-   require POSIX;
+   require Storable unless $Storable::VERSION;
+   require POSIX    unless $Storable::VERSION;
 
    while ($forks < $MAX_FORKS) {
       my $job = shift @fork_queue
@@ -367,14 +367,19 @@ BEGIN {
 
 =item $guard = guard { CODE }
 
-This function creates a special object that, when called, will execute the
-code block.
+This function creates a special object that, when called, will execute
+the code block.
 
 This is often handy in continuation-passing style code to clean up some
 resource regardless of where you break out of a process.
 
 The L<Guard> module will be used to implement this function, if it is
 available. Otherwise a pure-perl implementation is used.
+
+While the code is allowed to throw exceptions in unusual conditions, it is
+not defined whether this exception will be reported (at the moment, the
+Guard module and AnyEvent's pure-perl implementation both try to report
+the error and continue).
 
 You can call one method on the returned object:
 
@@ -398,7 +403,7 @@ BEGIN {
             ${$_[0]}->();
          };
 
-         AE::log 5 => "runtime error in AnyEvent::guard callback: $@" if $@;
+         AE::log 4 => "runtime error in AnyEvent::guard callback: $@" if $@;
       };
 
       *AnyEvent::Util::guard::cancel = sub ($) {
@@ -433,7 +438,7 @@ Example: close all fds except 0, 1, 2.
 sub close_all_fds_except {
    my %except; @except{@_} = ();
 
-   require POSIX;
+   require POSIX unless $POSIX::VERSION;
 
    # some OSes have a usable /dev/fd, sadly, very few
    if ($^O =~ /(freebsd|cygwin|linux)/) {
@@ -578,7 +583,7 @@ in the callback and print key and certificate.
 sub run_cmd {
    my $cmd = shift;
 
-   require POSIX;
+   require POSIX unless $POSIX::VERSION;
 
    my $cv = AE::cv;
 

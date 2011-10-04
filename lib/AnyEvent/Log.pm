@@ -8,12 +8,30 @@ Simple uses:
 
    use AnyEvent;
 
-   AE::log debug => "hit my knee";
-   AE::log warn  => "it's a bit too hot";
-   AE::log error => "the flag was false!";
-   AE::log fatal => "the bit toggled! run!"; # never returns
+   AE::log trace => "going to call function abc";
+   AE::log debug => "the function returned 3";
+   AE::log info  => "file soandso successfully deleted";
+   AE::log note  => "wanted to create config, but config was alraedy created";
+   AE::log warn  => "couldn't delete the file";
+   AE::log error => "failed to retrieve data";
+   AE::log crit  => "the battery temperature is too hot";
+   AE::log alert => "the battery died";
+   AE::log fatal => "no config found, cannot continue"; # never returns
 
-"Complex" uses (for speed sensitive code):
+Log level overview:
+
+   LVL NAME      SYSLOG   PERL  NOTE
+    1  fatal     emerg    exit  system unusable, aborts program!
+    2  alert                    failure in primary system
+    3  critical  crit           failure in backup system
+    4  error     err      die   non-urgent program errors, a bug
+    5  warn      warning        possible problem, not necessarily error
+    6  note      notice         unusual conditions
+    7  info                     normal messages, no action required
+    8  debug                    debugging messages for development
+    9  trace                    copious tracing output
+
+"Complex" uses (for speed sensitive code, e.g. trace/debug messages):
 
    use AnyEvent::Log;
 
@@ -74,20 +92,26 @@ numerical value".
 Instead of specifying levels by name you can also specify them by aliases:
 
    LVL NAME      SYSLOG   PERL  NOTE
-   1   fatal     emerg    exit  aborts program!
-   2   alert
-   3   critical  crit     
-   4   error     err      die
-   5   warn      warning  
-   6   note      notice   
-   7   info
-   8   debug
-   9   trace
+    1  fatal     emerg    exit  system unusable, aborts program!
+    2  alert                    failure in primary system
+    3  critical  crit           failure in backup system
+    4  error     err      die   non-urgent program errors, a bug
+    5  warn      warning        possible problem, not necessarily error
+    6  note      notice         unusual conditions
+    7  info                     normal messages, no action required
+    8  debug                    debugging messages for development
+    9  trace                    copious tracing output
 
 As you can see, some logging levels have multiple aliases - the first one
 is the "official" name, the second one the "syslog" name (if it differs)
-and the third one the "perl" name, suggesting that you log C<die> messages
-at C<error> priority.
+and the third one the "perl" name, suggesting (only!) that you log C<die>
+messages at C<error> priority. The NOTE column tries to provide some
+rationale on how to chose a logging level.
+
+As a rough guideline, levels 1..3 are primarily meant for users of
+the program (admins, staff), and are the only logged to STDERR by
+default. Levels 4..6 are meant for users and developers alike, while
+levels 7..9 are usually meant for developers.
 
 You can normally only log a single message at highest priority level
 (C<1>, C<fatal>), because logging a fatal message will also quit the
@@ -111,6 +135,10 @@ package AnyEvent::Log;
 
 use Carp ();
 use POSIX ();
+
+# layout of a context
+#       0       1         2        3        4,    5
+# [$title, $level, %$slaves, &$logcb, &$fmtcb, $cap]
 
 use AnyEvent (); BEGIN { AnyEvent::common_sense }
 #use AnyEvent::Util (); need to load this in a delayed fashion, as it uses AE::log
@@ -153,7 +181,7 @@ sub _pkg_ctx($) {
 Requests logging of the given C<$msg> with the given log level, and
 returns true if the message was logged I<somewhere>.
 
-For C<fatal> log levels, the program will abort.
+For loglevel C<fatal>, the program will abort.
 
 If only a C<$msg> is given, it is logged as-is. With extra C<@args>, the
 C<$msg> is interpreted as an sprintf format string.
@@ -165,6 +193,9 @@ Last not least, C<$msg> might be a code reference, in which case it is
 supposed to return the message. It will be called only then the message
 actually gets logged, which is useful if it is costly to create the
 message in the first place.
+
+This function takes care of saving and restoring C<$!> and C<$@>, so you
+don't have to.
 
 Whether the given message will be logged depends on the maximum log level
 and the caller's package. The return value can be used to ensure that
@@ -242,6 +273,10 @@ sub _format($$$$) {
    join "", @res
 }
 
+sub fatal_exit() {
+   exit 1;
+}
+
 sub _log {
    my ($ctx, $level, $format, @args) = @_;
 
@@ -251,14 +286,27 @@ sub _log {
 
    my $mask = 1 << $level;
 
-   my ($success, %seen, @ctx, $now, $fmt);
+   my ($success, %seen, @ctx, $now, @fmt);
 
    do
       {
-         # skip if masked
-         if ($ctx->[1] & $mask && !$seen{$ctx+0}++) {
+         # if !ref, then it's a level number
+         if (!ref $ctx) {
+            $level = $ctx;
+         } elsif ($ctx->[1] & $mask and !$seen{$ctx+0}++) {
+            # logging/recursing into this context
+
+            # level cap
+            if ($ctx->[5] > $level) {
+               push @ctx, $level; # restore level when going up in tree
+               $level = $ctx->[5];
+            }
+
+            # log if log cb
             if ($ctx->[3]) {
                # logging target found
+
+               local ($!, $@);
 
                # now get raw message, unless we have it already
                unless ($now) {
@@ -271,7 +319,7 @@ sub _log {
                # format msg
                my $str = $ctx->[4]
                   ? $ctx->[4]($now, $_[0], $level, $format)
-                  : ($fmt ||= _format $now, $_[0], $level, $format);
+                  : ($fmt[$level] ||= _format $now, $_[0], $level, $format);
 
                $success = 1;
 
@@ -284,7 +332,7 @@ sub _log {
       }
    while $ctx = pop @ctx;
 
-   exit 1 if $level <= 1;
+   fatal_exit if $level <= 1;
 
    $success
 }
@@ -294,8 +342,6 @@ sub log($$;@) {
       $CTX{ (caller)[0] } ||= _pkg_ctx +(caller)[0],
       @_;
 }
-
-*AnyEvent::log = *AE::log = \&log;
 
 =item $logger = AnyEvent::Log::logger $level[, \$enabled]
 
@@ -370,7 +416,7 @@ sub _logger {
 
    _reassess $logger+0;
 
-   require AnyEvent::Util;
+   require AnyEvent::Util unless $AnyEvent::Util::VERSION;
    my $guard = AnyEvent::Util::guard (sub {
       # "clean up"
       delete $LOGGER{$logger+0};
@@ -533,6 +579,9 @@ configuration, reset all contexts.
 
 =cut
 
+our $ORIG_VERBOSE = $AnyEvent::VERBOSE;
+$AnyEvent::VERBOSE = 9;
+
 sub reset {
    # hard to kill complex data structures
    # we "recreate" all package loggers and reset the hierarchy
@@ -551,13 +600,21 @@ sub reset {
 
    $FILTER->slaves ($LOG);
    $FILTER->title ('$AnyEvent::Log::FILTER');
-   $FILTER->level ($AnyEvent::VERBOSE);
+   $FILTER->level ($ORIG_VERBOSE);
 
    $COLLECT->slaves ($FILTER);
    $COLLECT->title ('$AnyEvent::Log::COLLECT');
 
    _reassess;
 }
+
+# override AE::log/logger
+*AnyEvent::log    = *AE::log    = \&log;
+*AnyEvent::logger = *AE::logger = \&logger;
+
+# convert AnyEvent loggers to AnyEvent::Log loggers
+$_->[0] = ctx $_->[0] # convert "pkg" to "ctx"
+   for values %LOGGER;
 
 # create the default logger contexts
 $LOG     = ctx undef;
@@ -575,9 +632,6 @@ package AnyEvent::Log::COLLECT;
 package AE::Log::COLLECT;
 
 package AnyEvent::Log::Ctx;
-
-#       0       1         2        3        4
-# [$title, $level, %$slaves, &$logcb, &$fmtcb]
 
 =item $ctx = new AnyEvent::Log::Ctx methodname => param...
 
@@ -675,6 +729,28 @@ Enables logging for the given levels, leaving all others unchanged.
 
 Disables logging for the given levels, leaving all others unchanged.
 
+=item $ctx->cap ($level)
+
+Caps the maximum priority to the given level, for all messages logged
+to, or passing through, this context. That is, while this doesn't affect
+whether a message is logged or passed on, the maximum priority of messages
+will be limited to the specified level - messages with a higher priority
+will be set to the specified priority.
+
+Another way to view this is that C<< ->level >> filters out messages with
+a too low priority, while C<< ->cap >> modifies messages with a too high
+priority.
+
+This is useful when different log targets have different interpretations
+of priority. For example, for a specific command line program, a wrong
+command line switch might well result in a C<fatal> log message, while the
+same message, logged to syslog, is likely I<not> fatal to the system or
+syslog facility as a whole, but more likely a mere C<error>.
+
+This can be modeled by having a stderr logger that logs messages "as-is"
+and a syslog logger that logs messages with a level cap of, say, C<error>,
+or, for truly system-critical components, actually C<critical>.
+
 =cut
 
 sub _lvl_lst {
@@ -683,6 +759,10 @@ sub _lvl_lst {
       : $_ eq "all"     ? (1 .. 9)
       : $STR2LEVEL{$_} || Carp::croak "$_: not a valid logging level, caught"
    } @_
+}
+
+sub _lvl {
+   $_[0] =~ /^(?:0|off|none)$/ ? 0 : (_lvl_lst $_[0])[-1]
 }
 
 our $NOP_CB = sub { 0 };
@@ -697,9 +777,7 @@ sub levels {
 
 sub level {
    my $ctx = shift;
-   my $lvl = $_[0] =~ /^(?:0|off|none)$/ ? 0 : (_lvl_lst $_[0])[-1];
-
-   $ctx->[1] =  ((1 << $lvl) - 1) << 1;
+   $ctx->[1] = ((1 << &_lvl) - 1) << 1;
    AnyEvent::Log::_reassess;
 }
 
@@ -715,6 +793,11 @@ sub disable {
    $ctx->[1] &= ~(1 << $_)
       for &_lvl_lst;
    AnyEvent::Log::_reassess;
+}
+
+sub cap {
+   my $ctx = shift;
+   $ctx->[5] = &_lvl;
 }
 
 =back
@@ -1056,9 +1139,15 @@ evaluated in the L<Sys::Syslog> package, so you could use:
 Configures the context to not log anything by itself, which is the
 default. Same as C<< $ctx->log_cb (undef) >>.
 
+=item C<cap=>I<level>
+
+Caps logging messages entering this context at the given level, i.e.
+reduces the priority of messages with higher priority than this level. The
+default is C<0> (or C<off>), meaning the priority will not be touched.
+
 =item C<0> or C<off>
 
-Sets the logging level of the context ot C<0>, i.e. all messages will be
+Sets the logging level of the context to C<0>, i.e. all messages will be
 filtered out.
 
 =item C<all>
@@ -1151,7 +1240,7 @@ for (my $spec = $ENV{PERL_ANYEVENT_LOG}) {
       $_[0] eq "log"              ? $LOG
       : $_[0] eq "filter"         ? $FILTER
       : $_[0] eq "collect"        ? $COLLECT
-      : $_[0] =~ /^%(.+)$/        ? ($anon{$1} ||= ctx undef)
+      : $_[0] =~ /^%(.+)$/        ? ($anon{$1} ||= do { my $ctx = ctx undef; $ctx->[0] = $_[0]; $ctx })
       : $_[0] =~ /^(.*?)(?:::)?$/ ? ctx "$1" # egad :/
       : die # never reached?
    };
@@ -1167,8 +1256,9 @@ for (my $spec = $ENV{PERL_ANYEVENT_LOG}) {
             if ($_ eq "stderr"               ) { $ctx->log_to_warn;
             } elsif (/^file=(.+)/            ) { $ctx->log_to_file ("$1");
             } elsif (/^path=(.+)/            ) { $ctx->log_to_path ("$1");
-            } elsif (/syslog(?:=(.*))?/      ) { require Sys::Syslog; $ctx->log_to_syslog ($1);
+            } elsif (/^syslog(?:=(.*))?/     ) { require Sys::Syslog; $ctx->log_to_syslog ("$1");
             } elsif ($_ eq "nolog"           ) { $ctx->log_cb (undef);
+            } elsif (/^cap=(.+)/             ) { $ctx->cap ("$1");
             } elsif (/^\+(.+)$/              ) { $ctx->attach ($pkg->("$1"));
             } elsif ($_ eq "+"               ) { $ctx->slaves;
             } elsif ($_ eq "off" or $_ eq "0") { $ctx->level (0);
@@ -1230,7 +1320,7 @@ This writes them only when the global logging level allows it, because
 it is attached to the default context which is invoked I<after> global
 filtering.
 
-   $AnyEvent::Log::FILTER->attach 
+   $AnyEvent::Log::FILTER->attach (
       new AnyEvent::Log::Ctx log_to_file => $path);
 
    PERL_ANYEVENT_LOG=filter=+%filelogger:%filelogger=file=/some/path
@@ -1245,6 +1335,23 @@ the global filtering.
    PERL_ANYEVENT_LOG=%filelogger=file=/some/path:collect=+%filelogger
 
 In both cases, messages are still written to STDERR.
+
+=item Additionally log all messages with C<warn> and higher priority to
+C<syslog>, but cap at C<error>.
+
+This logs all messages to the default log target, but also logs messages
+with priority C<warn> or higher (and not filtered otherwise) to syslog
+facility C<user>. Messages with priority higher than C<error> will be
+logged with level C<error>.
+
+   $AnyEvent::Log::LOG->attach (
+      new AnyEvent::Log::Ctx
+         level  => "warn",
+         cap    => "error",
+         syslog => "user",
+   );
+
+   PERL_ANYEVENT_LOG=log=+%syslog:%syslog=warn,cap=error,syslog
 
 =item Write trace messages (only) from L<AnyEvent::Debug> to the default logging target(s).
 
