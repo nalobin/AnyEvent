@@ -26,4 +26,4 @@ recommends:
   Net::SSLeay: 1.33
   Task::Weaken: 0
 requires: {}
-version: 6.12
+version: 6.13

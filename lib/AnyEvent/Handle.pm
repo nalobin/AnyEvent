@@ -1478,7 +1478,7 @@ register_read_type line => sub {
       sub {
          $_[0]{rbuf} =~ s/^([^\015\012]*)(\015?\012)// or return;
 
-         $cb->($_[0], $1, $2);
+         $cb->($_[0], "$1", "$2");
          1
       }
    } else {
@@ -1488,7 +1488,7 @@ register_read_type line => sub {
       sub {
          $_[0]{rbuf} =~ s/$eol// or return;
 
-         $cb->($_[0], $1, $2);
+         $cb->($_[0], "$1", "$2");
          1
       }
    }
@@ -1794,7 +1794,7 @@ attack to be working, as SSL/TLS implementations might stall sending data
 during a rehandshake.
 
 As a guideline, during the initial handshake, you should not stop reading,
-and as a client, it might cause problems, depending on your applciation.
+and as a client, it might cause problems, depending on your application.
 
 =cut
 
