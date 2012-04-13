@@ -726,7 +726,7 @@ sub resolver() {
       ;
 
       $ENV{PERL_ANYEVENT_RESOLV_CONF}
-         ? $RESOLVER->_parse_resolv_conf_file ($ENV{PERL_ANYEVENT_RESOLV_CONF})
+         ? $RESOLVER->_load_resolv_conf_file ($ENV{PERL_ANYEVENT_RESOLV_CONF})
          : $RESOLVER->os_config;
 
       $RESOLVER
@@ -796,6 +796,7 @@ sub new {
       max_outstanding => 10,
       reuse   => 300,
       %arg,
+      inhibit => 0,
       reuse_q => [],
    }, $class;
 
@@ -838,6 +839,18 @@ sub new {
    $self->_compile;
 
    $self
+}
+
+# called to start asynchronous configuration
+sub _config_begin {
+   ++$_[0]{inhibit};
+}
+
+# called when done with async config
+sub _config_done {
+   --$_[0]{inhibit};
+   $_[0]->_compile;
+   $_[0]->_scheduler;
 }
 
 =item $resolver->parse_resolv_conf ($string)
@@ -899,14 +912,21 @@ sub parse_resolv_conf {
    $self->_compile;
 }
 
-sub _parse_resolv_conf_file {
+sub _load_resolv_conf_file {
    my ($self, $resolv_conf) = @_;
 
-   open my $fh, "<", $resolv_conf
-      or Carp::croak "$resolv_conf: $!";
+   $self->_config_begin;
 
-   local $/;
-   $self->parse_resolv_conf (<$fh>);
+   require AnyEvent::IO;
+   AnyEvent::IO::aio_load ($resolv_conf, sub {
+      if (my ($contents) = @_) {
+         $self->parse_resolv_conf ($contents);
+      } else {
+         AE::log 4 => "$resolv_conf: $!";
+      }
+
+      $self->_config_done;
+   });
 }
 
 =item $resolver->os_config
@@ -915,15 +935,22 @@ Tries so load and parse F</etc/resolv.conf> on portable operating
 systems. Tries various egregious hacks on windows to force the DNS servers
 and searchlist out of the system.
 
+This method must be called at most once before trying to resolve anything.
+
 =cut
 
 sub os_config {
    my ($self) = @_;
 
+   $self->_config_begin;
+
    $self->{server} = [];
    $self->{search} = [];
 
    if ((AnyEvent::WIN32 || $^O =~ /cygwin/i)) {
+      # TODO: this blocks the program, but should not, but I
+      # am too lazy to implement and test it. need to boot windows. ugh.
+
       #no strict 'refs';
 
       # there are many options to find the current nameservers etc. on windows
@@ -954,7 +981,7 @@ sub os_config {
          1
       }) {
          # we use ipconfig parsing because, despite all its brokenness,
-         # it seems most stable in practise.
+         # it seems quite stable in practise.
          # unfortunately it wants a console window.
          # for good measure, we append a fallback nameserver to our list.
 
@@ -988,19 +1015,24 @@ sub os_config {
       # always add the fallback servers on windows
       push @{ $self->{server} }, @DNS_FALLBACK;
 
-      $self->_compile;
+      $self->_config_done;
    } else {
-      # try resolv.conf everywhere else
+      # try /etc/resolv.conf everywhere else
 
-      $self->_parse_resolv_conf_file ("/etc/resolv.conf")
-         if -e "/etc/resolv.conf";
+      require AnyEvent::IO;
+      AnyEvent::IO::aio_stat ("/etc/resolv.conf", sub {
+         $self->_load_resolv_conf_file ("/etc/resolv.conf")
+            if @_;
+         $self->_config_done;
+      });
    }
 }
 
 =item $resolver->timeout ($timeout, ...)
 
-Sets the timeout values. See the C<timeout> constructor argument (and note
-that this method uses the values itself, not an array-reference).
+Sets the timeout values. See the C<timeout> constructor argument (and
+note that this method expects the timeout values themselves, not an
+array-reference).
 
 =cut
 
@@ -1022,7 +1054,7 @@ sub max_outstanding {
    my ($self, $max) = @_;
 
    $self->{max_outstanding} = $max;
-   $self->_scheduler;
+   $self->_compile;
 }
 
 sub _compile {
@@ -1172,6 +1204,8 @@ sub _exec {
 sub _scheduler {
    my ($self) = @_;
 
+   return if $self->{inhibit};
+
    #no strict 'refs';
 
    $NOW = time;
@@ -1205,7 +1239,7 @@ sub _scheduler {
          $self->_exec ($req);
 
       } elsif (my $cb = shift @{ $self->{wait} }) {
-         # found a wait_for_slot callback, call that one first
+         # found a wait_for_slot callback
          $cb->($self);
 
       } else {
@@ -1352,74 +1386,78 @@ sub resolve($%) {
    my $cb = pop;
    my ($self, $qname, $qtype, %opt) = @_;
 
-   my @search = $qname =~ s/\.$//
-      ? ""
-      : $opt{search}
-        ? @{ $opt{search} }
-        : ($qname =~ y/.//) >= $self->{ndots}
-          ? ("", @{ $self->{search} })
-          : (@{ $self->{search} }, "");
+   $self->wait_for_slot (sub {
+      my $self = shift;
 
-   my $class = $opt{class} || "in";
+      my @search = $qname =~ s/\.$//
+         ? ""
+         : $opt{search}
+           ? @{ $opt{search} }
+           : ($qname =~ y/.//) >= $self->{ndots}
+             ? ("", @{ $self->{search} })
+             : (@{ $self->{search} }, "");
 
-   my %atype = $opt{accept}
-      ? map +($_ => 1), @{ $opt{accept} }
-      : ($qtype => 1);
+      my $class = $opt{class} || "in";
 
-   # advance in searchlist
-   my ($do_search, $do_req);
-   
-   $do_search = sub {
-      @search
-         or (undef $do_search), (undef $do_req), return $cb->();
+      my %atype = $opt{accept}
+         ? map +($_ => 1), @{ $opt{accept} }
+         : ($qtype => 1);
 
-      (my $name = lc "$qname." . shift @search) =~ s/\.$//;
-      my $depth = 10;
+      # advance in searchlist
+      my ($do_search, $do_req);
+      
+      $do_search = sub {
+         @search
+            or (undef $do_search), (undef $do_req), return $cb->();
 
-      # advance in cname-chain
-      $do_req = sub {
-         $self->request ({
-            rd => 1,
-            qd => [[$name, $qtype, $class]],
-         }, sub {
-            my ($res) = @_
-               or return $do_search->();
+         (my $name = lc "$qname." . shift @search) =~ s/\.$//;
+         my $depth = 10;
 
-            my $cname;
+         # advance in cname-chain
+         $do_req = sub {
+            $self->request ({
+               rd => 1,
+               qd => [[$name, $qtype, $class]],
+            }, sub {
+               my ($res) = @_
+                  or return $do_search->();
 
-            while () {
-               # results found?
-               my @rr = grep $name eq lc $_->[0] && ($atype{"*"} || $atype{$_->[1]}), @{ $res->{an} };
+               my $cname;
 
-               (undef $do_search), (undef $do_req), return $cb->(@rr)
-                  if @rr;
+               while () {
+                  # results found?
+                  my @rr = grep $name eq lc $_->[0] && ($atype{"*"} || $atype{$_->[1]}), @{ $res->{an} };
 
-               # see if there is a cname we can follow
-               my @rr = grep $name eq lc $_->[0] && $_->[1] eq "cname", @{ $res->{an} };
+                  (undef $do_search), (undef $do_req), return $cb->(@rr)
+                     if @rr;
 
-               if (@rr) {
-                  $depth--
-                     or return $do_search->(); # cname chain too long
+                  # see if there is a cname we can follow
+                  my @rr = grep $name eq lc $_->[0] && $_->[1] eq "cname", @{ $res->{an} };
 
-                  $cname = 1;
-                  $name = lc $rr[0][4];
+                  if (@rr) {
+                     $depth--
+                        or return $do_search->(); # cname chain too long
 
-               } elsif ($cname) {
-                  # follow the cname
-                  return $do_req->();
+                     $cname = 1;
+                     $name = lc $rr[0][4];
 
-               } else {
-                  # no, not found anything
-                  return $do_search->();
-               }
-             }
-         });
+                  } elsif ($cname) {
+                     # follow the cname
+                     return $do_req->();
+
+                  } else {
+                     # no, not found anything
+                     return $do_search->();
+                  }
+                }
+            });
+         };
+
+         $do_req->();
       };
 
-      $do_req->();
-   };
-
-   $do_search->();
+      $do_search->();
+   });
 }
 
 =item $resolver->wait_for_slot ($cb->($resolver))
@@ -1455,14 +1493,13 @@ sub wait_for_slot {
 
 use AnyEvent::Socket (); # circular dependency, so do not import anything and do it at the end
 
-1;
-
 =back
 
 =head1 AUTHOR
 
    Marc Lehmann <schmorp@schmorp.de>
-   http://home.schmorp.de/
+   http://anyevent.schmorp.de
 
 =cut
 
+1

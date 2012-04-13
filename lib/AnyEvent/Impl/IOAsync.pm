@@ -224,8 +224,6 @@ sub AnyEvent::CondVar::Base::_wait {
    $LOOP->loop_once until exists $_[0]{_ae_sent};
 }
 
-1;
-
 =head1 SEE ALSO
 
 L<AnyEvent>, L<IO::Async>.
@@ -233,10 +231,12 @@ L<AnyEvent>, L<IO::Async>.
 =head1 AUTHOR
 
  Marc Lehmann <schmorp@schmorp.de>
- http://home.schmorp.de/
+ http://anyevent.schmorp.de
 
  Paul Evans <leonerd@leonerd.org.uk>
  Rewrote the backend for IO::Async version 0.33.
 
 =cut
+
+1
 

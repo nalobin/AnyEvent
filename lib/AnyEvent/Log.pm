@@ -8,15 +8,15 @@ Simple uses:
 
    use AnyEvent;
 
-   AE::log trace => "going to call function abc";
+   AE::log fatal => "No config found, cannot continue!"; # never returns
+   AE::log alert => "The battery died!";
+   AE::log crit  => "The battery temperature is too hot!";
+   AE::log error => "Division by zero attempted.";
+   AE::log warn  => "Couldn't delete the file.";
+   AE::log note  => "Wanted to create config, but config already exists.";
+   AE::log info  => "File soandso successfully deleted.";
    AE::log debug => "the function returned 3";
-   AE::log info  => "file soandso successfully deleted";
-   AE::log note  => "wanted to create config, but config was alraedy created";
-   AE::log warn  => "couldn't delete the file";
-   AE::log error => "failed to retrieve data";
-   AE::log crit  => "the battery temperature is too hot";
-   AE::log alert => "the battery died";
-   AE::log fatal => "no config found, cannot continue"; # never returns
+   AE::log trace => "going to call function abc";
 
 Log level overview:
 
@@ -63,10 +63,11 @@ AnyEvent - AnyEvent simply creates logging messages internally, and this
 module more or less exposes the mechanism, with some extra spiff to allow
 using it from other modules as well.
 
-Remember that the default verbosity level is C<0> (C<off>), so nothing
-will be logged, unless you set C<PERL_ANYEVENT_VERBOSE> to a higher number
-before starting your program, or change the logging level at runtime with
-something like:
+Remember that the default verbosity level is C<4> (C<error>), so only
+errors and more important messages will be logged, unless you set
+C<PERL_ANYEVENT_VERBOSE> to a higher number before starting your program
+(C<AE_VERBOSE=5> is recommended during development), or change the logging
+level at runtime with something like:
 
    use AnyEvent::Log;
    $AnyEvent::Log::FILTER->level ("info");
@@ -108,24 +109,28 @@ and the third one the "perl" name, suggesting (only!) that you log C<die>
 messages at C<error> priority. The NOTE column tries to provide some
 rationale on how to chose a logging level.
 
-As a rough guideline, levels 1..3 are primarily meant for users of
-the program (admins, staff), and are the only logged to STDERR by
+As a rough guideline, levels 1..3 are primarily meant for users of the
+program (admins, staff), and are the only ones logged to STDERR by
 default. Levels 4..6 are meant for users and developers alike, while
 levels 7..9 are usually meant for developers.
 
-You can normally only log a single message at highest priority level
-(C<1>, C<fatal>), because logging a fatal message will also quit the
-program - so use it sparingly :)
+You can normally only log a message once at highest priority level (C<1>,
+C<fatal>), because logging a fatal message will also quit the program - so
+use it sparingly :)
+
+For example, a program that finds an unknown switch on the commandline
+might well use a fatal logging level to tell users about it - the "system"
+in this case would be the program, or module.
 
 Some methods also offer some extra levels, such as C<0>, C<off>, C<none>
-or C<all> - these are only valid in the methods they are documented for.
+or C<all> - these are only valid for the methods that documented them.
 
 =head1 LOGGING FUNCTIONS
 
-These functions allow you to log messages. They always use the caller's
-package as a "logging context". Also, the main logging function C<log> is
-callable as C<AnyEvent::log> or C<AE::log> when the C<AnyEvent> module is
-loaded.
+The following functions allow you to log messages. They always use the
+caller's package as a "logging context". Also, the main logging function,
+C<log>, is aliased to C<AnyEvent::log> and C<AE::log> when the C<AnyEvent>
+module is loaded.
 
 =over 4
 
@@ -861,7 +866,7 @@ whatever it wants to do with it).
 
 =over 4
 
-=item $ctx->log_cb ($cb->($str)
+=item $ctx->log_cb ($cb->($str))
 
 Replaces the logging callback on the context (C<undef> disables the
 logging callback).
@@ -896,12 +901,12 @@ Replaces the formatting callback on the context (C<undef> restores the
 default formatter).
 
 The callback is passed the (possibly fractional) timestamp, the original
-logging context, the (numeric) logging level and the raw message string
-and needs to return a formatted log message. In most cases this will be a
-string, but it could just as well be an array reference that just stores
-the values.
+logging context (object, not title), the (numeric) logging level and
+the raw message string and needs to return a formatted log message. In
+most cases this will be a string, but it could just as well be an array
+reference that just stores the values.
 
-If, for some reason, you want to use C<caller> to find out more baout the
+If, for some reason, you want to use C<caller> to find out more about the
 logger then you should walk up the call stack until you are no longer
 inside the C<AnyEvent::Log> package.
 
@@ -915,7 +920,7 @@ brackets.
    });
 
 Example: return an array reference with just the log values, and use
-C<PApp::SQL::sql_exec> to store the emssage in a database.
+C<PApp::SQL::sql_exec> to store the message in a database.
 
    $ctx->fmt_cb (sub { \@_ });
    $ctx->log_cb (sub {
@@ -937,7 +942,8 @@ Sets the C<log_cb> to simply use C<CORE::warn> to report any messages
 
 =item $ctx->log_to_file ($path)
 
-Sets the C<log_cb> to log to a file (by appending), unbuffered.
+Sets the C<log_cb> to log to a file (by appending), unbuffered. The
+function might return before the log file has been opened or created.
 
 =item $ctx->log_to_path ($path)
 
@@ -982,28 +988,100 @@ sub log_to_warn {
    });
 }
 
+# this function is a good example of why threads are a must,
+# simply for priority inversion.
+sub _log_to_disk {
+   # eval'uating this at runtime saves 220kb rss - perl has become
+   # an insane memory waster.
+   eval q{ # poor man's autoloading {}
+      sub _log_to_disk {
+         my ($ctx, $path, $keepopen) = @_;
+
+         my $fh;
+         my @queue;
+         my $delay;
+         my $disable;
+
+         use AnyEvent::IO ();
+
+         my $kick = sub {
+            undef $delay;
+            return unless @queue;
+            $delay = 1;
+
+            # we pass $kick to $kick, so $kick itself doesn't keep a reference to $kick.
+            my $kick = shift;
+
+            # write one or more messages
+            my $write = sub {
+               # we write as many messages as have been queued
+               my $data = join "", @queue;
+               @queue = ();
+
+               AnyEvent::IO::aio_write $fh, $data, sub {
+                  $disable = 1;
+                  @_
+                     ? ($_[0] == length $data or AE::log 4 => "unable to write to logfile '$path': short write")
+                     :                           AE::log 4 => "unable to write to logfile '$path': $!";
+                  undef $disable;
+
+                  if ($keepopen) {
+                     $kick->($kick);
+                  } else {
+                     AnyEvent::IO::aio_close ($fh, sub {
+                        undef $fh;
+                        $kick->($kick);
+                     });
+                  }
+               };
+            };
+
+            if ($fh) {
+               $write->();
+            } else {
+               AnyEvent::IO::aio_open
+                  $path,
+                  AnyEvent::IO::O_CREAT | AnyEvent::IO::O_WRONLY | AnyEvent::IO::O_APPEND,
+                  0666,
+                  sub {
+                     $fh = shift
+                        or do {
+                           $disable = 1;
+                           AE::log 4 => "unable to open logfile '$path': $!";
+                           undef $disable;
+                           return;
+                        };
+
+                     $write->();
+                  }
+               ;
+            }
+         };
+
+         $ctx->log_cb (sub {
+            return if $disable;
+            push @queue, shift;
+            $kick->($kick) unless $delay;
+            0
+         });
+
+         $kick->($kick) if $keepopen; # initial open
+      };
+   };
+   die if $@;
+   &_log_to_disk
+}
+
 sub log_to_file {
    my ($ctx, $path) = @_;
 
-   open my $fh, ">>", $path
-      or die "$path: $!";
-
-   $ctx->log_cb (sub {
-      syswrite $fh, shift;
-      0
-   });
+   _log_to_disk $ctx, $path, 1;
 }
 
 sub log_to_path {
    my ($ctx, $path) = @_;
 
-   $ctx->log_cb (sub {
-      open my $fh, ">>", $path
-         or die "$path: $!";
-
-      syswrite $fh, shift;
-      0
-   });
+   _log_to_disk $ctx, $path, 0;
 }
 
 sub log_to_syslog {
@@ -1042,6 +1120,10 @@ going via your package context.
 =item $ctx->log ($level, $msg[, @params])
 
 Same as C<AnyEvent::Log::log>, but uses the given context as log context.
+
+Example: log a message in the context of another package.
+
+   (AnyEvent::Log::ctx "Other::Package")->log (warn => "heely bo");
 
 =item $logger = $ctx->logger ($level[, \$enabled])
 
@@ -1199,7 +1281,7 @@ Attaches the named context as slave to the context.
 
 =item C<+>
 
-A line C<+> detaches all contexts, i.e. clears the slave list from the
+A lone C<+> detaches all contexts, i.e. clears the slave list from the
 context. Anonymous (C<%name>) contexts have no attached slaves by default,
 but package contexts have the parent context as slave by default.
 
@@ -1284,8 +1366,6 @@ for (my $spec = $ENV{PERL_ANYEVENT_LOG}) {
       die "PERL_ANYEVENT_LOG ($spec): parse error at '$1'\n";
    }
 }
-
-1;
 
 =head1 EXAMPLES
 
@@ -1372,7 +1452,9 @@ default.
 =head1 AUTHOR
 
  Marc Lehmann <schmorp@schmorp.de>
- http://home.schmorp.de/
+ http://anyevent.schmorp.de
 
 =cut
+
+1
 

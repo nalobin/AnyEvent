@@ -13,7 +13,7 @@ AnyEvent::Handle - non-blocking I/O on streaming handles via AnyEvent
       fh => \*STDIN,
       on_error => sub {
          my ($hdl, $fatal, $msg) = @_;
-         AE::log error => "got error $msg\n";
+         AE::log error => $msg;
          $hdl->destroy;
          $cv->send;
       };
@@ -130,13 +130,19 @@ default timeout is to be used).
 This callback is called when a connection has been successfully established.
 
 The peer's numeric host and port (the socket peername) are passed as
-parameters, together with a retry callback.
+parameters, together with a retry callback. At the time it is called the
+read and write queues, EOF status, TLS status and similar properties of
+the handle will have been reset.
 
-If, for some reason, the handle is not acceptable, calling C<$retry>
-will continue with the next connection target (in case of multi-homed
-hosts or SRV records there can be multiple connection endpoints). At the
-time it is called the read and write queues, eof status, tls status and
-similar properties of the handle will have been reset.
+It is not allowed to use the read or write queues while the handle object
+is connecting.
+
+If, for some reason, the handle is not acceptable, calling C<$retry> will
+continue with the next connection target (in case of multi-homed hosts or
+SRV records there can be multiple connection endpoints). The C<$retry>
+callback can be invoked after the connect callback returns, i.e. one can
+start a handshake and then decide to retry with the next host if the
+handshake fails.
 
 In most cases, you should ignore the C<$retry> parameter.
 
@@ -166,9 +172,15 @@ cases where the other side can close the connection at will, it is
 often easiest to not report C<EPIPE> errors in this callback.
 
 AnyEvent::Handle tries to find an appropriate error code for you to check
-against, but in some cases (TLS errors), this does not work well. It is
-recommended to always output the C<$message> argument in human-readable
-error messages (it's usually the same as C<"$!">).
+against, but in some cases (TLS errors), this does not work well.
+
+If you report the error to the user, it is recommended to always output
+the C<$message> argument in human-readable error messages (you don't need
+to report C<"$!"> if you report C<$message>).
+
+If you want to react programmatically to the error, then looking at C<$!>
+and comparing it against some of the documented C<Errno> values is usually
+better than looking at the C<$message>.
 
 Non-fatal errors can be retried by returning, but it is recommended
 to simply ignore this parameter and instead abondon the handle object
@@ -226,8 +238,8 @@ set, then a fatal error will be raised with C<$!> set to <0>.
 
 =item on_drain => $cb->($handle)
 
-This sets the callback that is called when the write buffer becomes empty
-(or immediately if the buffer is empty already).
+This sets the callback that is called once when the write buffer becomes
+empty (and immediately when the handle object is created).
 
 To append to the write buffer, use the C<< ->push_write >> method.
 
@@ -882,7 +894,7 @@ The write queue is very simple: you can add data to its end, and
 AnyEvent::Handle will automatically try to get rid of it for you.
 
 When data could be written and the write buffer is shorter then the low
-water mark, the C<on_drain> callback will be invoked.
+water mark, the C<on_drain> callback will be invoked once.
 
 =over 4
 
@@ -1726,18 +1738,17 @@ register_read_type storable => sub {
       if ($format + $len <= length $_[0]{rbuf}) {
          my $data = substr $_[0]{rbuf}, $format, $len;
          substr $_[0]{rbuf}, 0, $format + $len, "";
-         $cb->($_[0], Storable::thaw ($data));
+
+         eval { $cb->($_[0], Storable::thaw ($data)); 1 }
+            or return $_[0]->_error (Errno::EBADMSG);
       } else {
          # remove prefix
          substr $_[0]{rbuf}, 0, $format, "";
 
          # read remaining chunk
          $_[0]->unshift_read (chunk => $len, sub {
-            if (my $ref = eval { Storable::thaw ($_[1]) }) {
-               $cb->($_[0], $ref);
-            } else {
-               $_[0]->_error (Errno::EBADMSG);
-            }
+            eval { $cb->($_[0], Storable::thaw ($_[1])); 1 }
+               or $_[0]->_error (Errno::EBADMSG);
          });
       }
 
@@ -1852,7 +1863,7 @@ sub _tls_error {
    return $self->_error ($!, 1)
       if $err == Net::SSLeay::ERROR_SYSCALL ();
 
-   my $err =Net::SSLeay::ERR_error_string (Net::SSLeay::ERR_get_error ());
+   my $err = Net::SSLeay::ERR_error_string (Net::SSLeay::ERR_get_error ());
 
    # reduce error string to look less scary
    $err =~ s/^error:[0-9a-fA-F]{8}:[^:]+:([^:]+):/\L$1: /;
@@ -2332,7 +2343,7 @@ written to the socket:
 
    $handle->push_write (...);
    $handle->on_drain (sub {
-      AE::log debug => "all data submitted to the kernel\n";
+      AE::log debug => "All data submitted to the kernel.";
       undef $handle;
    });
 
@@ -2426,7 +2437,6 @@ know about, just append them to the C<cert_file>.
 
 =back
 
-
 =head1 SUBCLASSING AnyEvent::Handle
 
 In many cases, you might want to subclass AnyEvent::Handle.
@@ -2462,4 +2472,5 @@ Robin Redeker C<< <elmex at ta-sa.org> >>, Marc Lehmann <schmorp@schmorp.de>.
 
 =cut
 
-1; # End of AnyEvent::Handle
+1
+

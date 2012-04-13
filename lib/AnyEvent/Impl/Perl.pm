@@ -64,8 +64,6 @@ sub idle {
    AnyEvent::Loop::idle $arg{cb}
 }
 
-1;
-
 =head1 SEE ALSO
 
 L<AnyEvent>.
@@ -73,8 +71,9 @@ L<AnyEvent>.
 =head1 AUTHOR
 
    Marc Lehmann <schmorp@schmorp.de>
-   http://home.schmorp.de/
+   http://anyevent.schmorp.de
 
 =cut
 
+1
 

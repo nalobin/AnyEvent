@@ -23,6 +23,9 @@ lib/AnyEvent/Impl/POE.pm
 lib/AnyEvent/Impl/Perl.pm
 lib/AnyEvent/Impl/Qt.pm
 lib/AnyEvent/Impl/Tk.pm
+lib/AnyEvent/IO.pm
+lib/AnyEvent/IO/IOAIO.pm
+lib/AnyEvent/IO/Perl.pm
 lib/AnyEvent/Intro.pod
 lib/AnyEvent/Log.pm
 lib/AnyEvent/Loop.pm
@@ -44,6 +47,9 @@ t/07_io.t
 t/08_idna.t
 t/09_multi.t
 t/10_loadall.t
+t/io_common 
+t/11_io_perl.t
+t/12_io_ioaio.t
 t/handle/01_readline.t
 t/handle/02_write.t
 t/handle/03_http_req.t
@@ -80,8 +86,12 @@ t/62_cocoa_05_dns.t
 t/62_cocoa_07_io.t
 t/62_cocoa_09_multi.t
 t/63_eventlib_01_basic.t
+t/63_eventlib_02_signals.t
+t/63_eventlib_03_child.t
 t/63_eventlib_04_condvar.t
 t/63_eventlib_05_dns.t
+t/63_eventlib_07_io.t
+t/63_eventlib_09_multi.t
 t/64_glib_01_basic.t
 t/64_glib_02_signals.t
 t/64_glib_03_child.t

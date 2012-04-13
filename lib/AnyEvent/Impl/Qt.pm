@@ -123,8 +123,6 @@ sub AnyEvent::CondVar::Base::_wait {
    Qt::app->processOneEvent until exists $_[0]{_ae_sent};
 }
 
-1;
-
 =head1 SEE ALSO
 
 L<AnyEvent>, L<Qt>.
@@ -132,8 +130,9 @@ L<AnyEvent>, L<Qt>.
 =head1 AUTHOR
 
    Marc Lehmann <schmorp@schmorp.de>
-   http://home.schmorp.de/
+   http://anyevent.schmorp.de
 
 =cut
 
+1
 

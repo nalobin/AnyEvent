@@ -86,7 +86,7 @@ that say the program *might* be buggy.
 While this is not good to performance, at least regarding speed, with a
 modern Linux kernel, the overhead is actually quite small.
 
-=item Timing Deficiencies
+=item Timing deficiencies
 
 POE manages to not have a function that returns the current time. This is
 extremely problematic, as POE can use different time functions, which can
@@ -105,7 +105,7 @@ AnyEvent works around the unavailability of the current time using
 relative timers exclusively, in the hope that POE gets it right at least
 internally.
 
-=item Event Non-Ordering
+=item Lack of defined event ordering
 
 POE cannot guarantee the order of callback invocation for timers, and
 usually gets it wrong. That is, if you have two timers, one timing out
@@ -114,7 +114,7 @@ reverse order.
 
 How one manages to even implement stuff that way escapes me.
 
-=item Child Watchers
+=item Child watchers
 
 POE offers child watchers - which is a laudable thing, as few event loops
 do. Unfortunately, they cannot even implement AnyEvent's simple child
@@ -122,11 +122,16 @@ watchers: they are not generic enough (the POE implementation isn't even
 generic enough to let properly designed back-end use their native child
 watcher instead - it insist on doing it itself the broken way).
 
-Unfortunately, POE's child handling is inherently racy: if the child
-exits before the handler is created (which is impossible to avoid in
-general, imagine the forked program to exit immediately because of a bug,
-or imagine the POE kernel being busy for a second), one has to wait for
-another event to occur, which can take an indefinite amount of time.
+Unfortunately, POE's child handling is inherently racy: if the child exits
+before the handler is created (because e.g. it crashes or simply is quick
+about it), then current versions of POE (1.352) will I<never> invoke the
+child watcher, and there is nothing that can be done about it. Older
+versions of POE only delayed in this case. The reason is that POE first
+checks if the child has already exited, and I<then> installs the signal
+handler - aa classical race.
+
+Your only hope is for the fork'ed process to not exit too quickly, in
+which case everything happens to work.
 
 Of course, whenever POE reaps an unrelated child it will also output a
 message for it that you cannot suppress (which shouldn't be too surprising
@@ -140,10 +145,10 @@ How one manages to have such a glaring bug in an event loop after ten
 years of development escapes me.
 
 (There are more annoying bugs, for example, POE runs C<waitpid>
-unconditionally on finalizing, so your program will hang until all child
-processes have exited.)
+unconditionally at finaliser time, so your program will hang until all
+child processes have exited.)
 
-=item Documentation Quality
+=item Documentation quality
 
 At the time of this writing, POE was in its tenth year. Still, its
 documentation is extremely lacking, making it impossible to implement
@@ -247,6 +252,23 @@ POE manpage understands.
 
 The POE-recommended workaround to this is apparently to use
 C<fork>. Consequently, idle watchers will have to be emulated by AnyEvent.
+
+=item Questionable maintainer behaviour
+
+The author of POE is known to fabricate statements and post these to
+public mailinglists - apparently, spreading FUD about competing (in his
+eyes) projects or their maintainers is acceptable to him.
+
+This has (I believe) zero effects on the quality or usefulness of his
+code, but it does completely undermine his trustworthyness - so don't
+blindly believe anything he says, he might have just made it up to suit
+his needs (benchmark results, the names of my ten wifes, the length of my
+penis, etc. etc.). When in doubt, double-check - not just him, anybody
+actually.
+
+Example: L<http://www.nntp.perl.org/group/perl.perl5.porters/2012/01/msg182141.html>.
+I challenged him in that thread to provide evidence for his statement by giving at
+least two examples, but of course since he just made it up, he couldn't provide any evidence.
 
 =back
 
@@ -384,8 +406,6 @@ sub AnyEvent::CondVar::Base::_wait {
    POE::Kernel->loop_do_timeslice until exists $_[0]{_ae_sent};
 }
 
-1;
-
 =head1 SEE ALSO
 
 L<AnyEvent>, L<POE>.
@@ -393,7 +413,9 @@ L<AnyEvent>, L<POE>.
 =head1 AUTHOR
 
  Marc Lehmann <schmorp@schmorp.de>
- http://home.schmorp.de/
+ http://anyevent.schmorp.de
 
 =cut
+
+1
 

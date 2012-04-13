@@ -646,26 +646,14 @@ Example:
 
 =cut
 
-our %HOSTS;
-our $HOSTS;
+our %HOSTS;          # $HOSTS{$nodename}[$ipv6] = [@aliases...]
+our @HOSTS_CHECKING; # callbacks to call when hosts have been loaded
+our $HOSTS_MTIME;
 
-if (
-   open my $fh, "<",
-      length $ENV{PERL_ANYEVENT_HOSTS} ? $ENV{PERL_ANYEVENT_HOSTS}
-      : AnyEvent::WIN32                ? "$ENV{SystemRoot}/system32/drivers/etc/hosts"
-      :                                  "/etc/hosts"
-) {
-   local $/;
-   binmode $fh;
-   $HOSTS = <$fh>;
-} else {
-   $HOSTS = "";
-}
+sub _parse_hosts($) {
+   %HOSTS = ();
 
-sub _parse_hosts() {
-   #%HOSTS = ();
-
-   for (split /\n/, $HOSTS) {
+   for (split /\n/, $_[0]) {
       s/#.*$//;
       s/^[ \t]+//;
       y/A-Z/a-z/;
@@ -681,8 +669,44 @@ sub _parse_hosts() {
             for @aliases;
       }
    }
+}
 
-   undef $HOSTS;
+# helper function - unless dns delivered results, check and parse hosts, then clal continuation code
+sub _load_hosts_unless(&$@) {
+   my ($cont, $cv, @dns) = @_;
+
+   if (@dns) {
+      $cv->end;
+   } else {
+      my $etc_hosts = length $ENV{PERL_ANYEVENT_HOSTS} ? $ENV{PERL_ANYEVENT_HOSTS}
+                      : AnyEvent::WIN32                ? "$ENV{SystemRoot}/system32/drivers/etc/hosts"
+                      :                                  "/etc/hosts";
+
+      push @HOSTS_CHECKING, sub {
+         $cont->();
+         $cv->end;
+      };
+
+      unless ($#HOSTS_CHECKING) {
+         # we are not the first, so we actually have to do the work
+         require AnyEvent::IO;
+
+         AnyEvent::IO::aio_stat ($etc_hosts, sub {
+            if ((stat _)[9] ne $HOSTS_MTIME) {
+               AE::log 8 => "(re)loading $etc_hosts.";
+               $HOSTS_MTIME = (stat _)[9];
+               # we might load a newer version of hosts,but that's a harmless race,
+               # as the next call will just load it again.
+               AnyEvent::IO::aio_load ($etc_hosts, sub {
+                  _parse_hosts $_[0];
+                  (shift @HOSTS_CHECKING)->() while @HOSTS_CHECKING;
+               });
+            } else {
+               (shift @HOSTS_CHECKING)->() while @HOSTS_CHECKING;
+            }
+         });
+      }
+   }
 }
 
 sub resolve_sockaddr($$$$$$) {
@@ -769,12 +793,11 @@ sub resolve_sockaddr($$$$$$) {
                      for @_;
 
                   # dns takes precedence over hosts
-                  push @res,
-                     map [$idx, "ipv4", [AF_INET , $type, $proton, pack_sockaddr $port, $_]],
-                        @{ $hosts->[0] }
-                     unless @_;
-
-                  $cv->end;
+                  _load_hosts_unless {
+                     push @res,
+                        map [$idx, "ipv4", [AF_INET , $type, $proton, pack_sockaddr $port, $_]],
+                           @{ $HOSTS{$node}[0] };
+                  } $cv, @_;
                };
             }
 
@@ -785,12 +808,11 @@ sub resolve_sockaddr($$$$$$) {
                   push @res, [$idx, "ipv6", [AF_INET6, $type, $proton, pack_sockaddr $port, parse_ipv6 $_]]
                      for @_;
 
-                  push @res,
-                     map [$idx + 0.5, "ipv6", [AF_INET6, $type, $proton, pack_sockaddr $port, $_]],
-                        @{ $hosts->[1] }
-                     unless @_;
-
-                  $cv->end;
+                  _load_hosts_unless {
+                     push @res,
+                        map [$idx + 0.5, "ipv6", [AF_INET6, $type, $proton, pack_sockaddr $port, $_]],
+                           @{ $HOSTS{$node}[1] }
+                  } $cv, @_;
                };
             }
          }
@@ -800,12 +822,6 @@ sub resolve_sockaddr($$$$$$) {
 
    $node = AnyEvent::Util::idn_to_ascii $node
       if $node =~ /[^\x00-\x7f]/;
-
-   # parse hosts
-   if (defined $HOSTS) {
-      _parse_hosts;
-      undef &_parse_hosts;
-   }
 
    # try srv records, if applicable
    if ($node eq "localhost") {
@@ -921,12 +937,12 @@ to 15 seconds.
          $handle = new AnyEvent::Handle
             fh     => $fh,
             on_error => sub {
-               AE::log error => "error $_[2]";
+               AE::log error => $_[2];
                $_[0]->destroy;
             },
             on_eof => sub {
                $handle->destroy; # destroy handle
-               AE::log info => "done.";
+               AE::log info => "Done.";
             };
 
          $handle->push_write ("GET / HTTP/1.0\015\012\015\012");
@@ -1089,6 +1105,9 @@ whose lifetime it tied to the TCP server: If the object gets destroyed,
 the server will be stopped (but existing accepted connections will
 not be affected).
 
+Regardless, when the function returns to the caller, the socket is bound
+and in listening state.
+
 If you need more control over the listening socket, you can provide a
 C<< $prepare_cb->($fh, $host, $port) >>, which is called just before the
 C<listen ()> call, with the listen file handle as first argument, and IP
@@ -1113,7 +1132,7 @@ to go away.
       syswrite $fh, "The internet is full, $host:$port. Go away!\015\012";
    }, sub {
       my ($fh, $thishost, $thisport) = @_;
-      AE::log info => "bound to $thishost, port $thisport";
+      AE::log info => "Bound to $thishost, port $thisport.";
    };
 
 Example: bind a server on a unix domain socket.
@@ -1229,8 +1248,6 @@ sub tcp_congestion($$) {
       : undef
 }
 
-1;
-
 =back
 
 =head1 SECURITY CONSIDERATIONS
@@ -1245,7 +1262,9 @@ harmful in general.
 =head1 AUTHOR
 
  Marc Lehmann <schmorp@schmorp.de>
- http://home.schmorp.de/
+ http://anyevent.schmorp.de
 
 =cut
+
+1
 

@@ -60,7 +60,7 @@ BEGIN {
 
    while (my ($k, $v) = each %ERR) {
       next if eval "Errno::$k ()";
-      AE::log 8 => "AnyEvent::Util: broken Errno module, adding Errno::$k.";
+      AE::log 8 => "Broken Errno module, adding Errno::$k.";
 
       eval "sub Errno::$k () { $v }";
       push @Errno::EXPORT_OK, $k;
@@ -77,7 +77,7 @@ cannot use select on.
 
 This function gives you a pipe that actually works even on the broken
 windows platform (by creating a pair of TCP sockets on windows, so do not
-expect any speed from that, and using C<pipe> everywhere else).
+expect any speed from that) and using C<pipe> everywhere else.
 
 See C<portable_socketpair>, below, for a bidirectional "pipe".
 
@@ -126,7 +126,6 @@ BEGIN {
 
             # vista has completely broken peername/sockname that return
             # fantasy ports. this combo seems to work, though.
-            #
             (Socket::unpack_sockaddr_in getpeername $r)[0]
             == (Socket::unpack_sockaddr_in getsockname $w)[0]
                or (($! = WSAEINVAL), next);
@@ -393,7 +392,7 @@ guard.
 BEGIN {
    if (!$ENV{PERL_ANYEVENT_AVOID_GUARD} && eval { require Guard; $Guard::VERSION >= 0.5 }) {
       *guard = \&Guard::guard;
-      AE::log 8 => "AnyEvent::Util: using Guard module to implement guards.";
+      AE::log 8 => "Using Guard module to implement guards.";
    } else {
       *AnyEvent::Util::guard::DESTROY = sub {
          local $@;
@@ -403,7 +402,7 @@ BEGIN {
             ${$_[0]}->();
          };
 
-         AE::log 4 => "runtime error in AnyEvent::guard callback: $@" if $@;
+         AE::log 4 => "Runtime error in AnyEvent::guard callback: $@" if $@;
       };
 
       *AnyEvent::Util::guard::cancel = sub ($) {
@@ -414,7 +413,7 @@ BEGIN {
          bless \(my $cb = shift), "AnyEvent::Util::guard"
       };
 
-      AE::log 8 => "AnyEvent::Util: using pure-perl guard implementation.";
+      AE::log 8 => "Using pure-perl guard implementation.";
    }
 }
 
@@ -954,15 +953,14 @@ sub idn_to_unicode($) {
    defined $res ? $res : $_[0]
 }
 
-
-1;
-
 =back
 
 =head1 AUTHOR
 
  Marc Lehmann <schmorp@schmorp.de>
- http://home.schmorp.de/
+ http://anyevent.schmorp.de
 
 =cut
+
+1
 
