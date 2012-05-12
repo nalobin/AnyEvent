@@ -431,7 +431,8 @@ appropriate error message.
 TLS mode requires Net::SSLeay to be installed (it will be loaded
 automatically when you try to create a TLS handle): this module doesn't
 have a dependency on that module, so if your module requires it, you have
-to add the dependency yourself.
+to add the dependency yourself. If Net::SSLeay cannot be loaded or is too
+old, you get an C<EPROTO> error.
 
 Unlike TCP, TLS has a server and client side: for the TLS server side, use
 C<accept>, and for the TLS client side of a connection, use C<connect>
@@ -1756,6 +1757,92 @@ register_read_type storable => sub {
    }
 };
 
+=item tls_detect => $cb->($handle, $detect, $major, $minor)
+
+Checks the input stream for a valid SSL or TLS handshake TLSPaintext
+record without consuming anything. Only SSL version 3 or higher
+is handled, up to the fictituous protocol 4.x (but both SSL3+ and
+SSL2-compatible framing is supported).
+
+If it detects that the input data is likely TLS, it calls the callback
+with a true value for C<$detect> and the (on-wire) TLS version as second
+and third argument (C<$major> is C<3>, and C<$minor> is 0..3 for SSL
+3.0, TLS 1.0, 1.1 and 1.2, respectively).  If it detects the input to
+be definitely not TLS, it calls the callback with a false value for
+C<$detect>.
+
+The callback could use this information to decide whether or not to start
+TLS negotiation.
+
+In all cases the data read so far is passed to the following read
+handlers.
+
+Usually you want to use the C<tls_autostart> read type instead.
+
+If you want to design a protocol that works in the presence of TLS
+dtection, make sure that any non-TLS data doesn't start with the octet 22
+(ASCII SYN, 16 hex) or 128-255 (i.e. highest bit set). The checks this
+read type does are a bit more strict, but might losen in the future to
+accomodate protocol changes.
+
+This read type does not rely on L<AnyEvent::TLS> (and thus, not on
+L<Net::SSLeay>).
+
+=item tls_autostart => $tls[, $tls_ctx]
+
+Tries to detect a valid SSL or TLS handshake. If one is detected, it tries
+to start tls by calling C<starttls> with the given arguments.
+
+In practise, C<$tls> must be C<accept>, or a Net::SSLeay context that has
+been configured to accept, as servers do not normally send a handshake on
+their own and ths cannot be detected in this way.
+
+See C<tls_detect> above for more details.
+
+Example: give the client a chance to start TLS before accepting a text
+line.
+
+   $hdl->push_read (tls_detect => "accept");
+   $hdl->push_read (line => sub {
+      print "received ", ($_[0]{tls} ? "encrypted" : "cleartext"), " <$_[1]>\n";
+   });
+
+=cut
+
+register_read_type tls_detect => sub {
+   my ($self, $cb) = @_;
+
+   sub {
+      # this regex matches a full or partial tls record
+      if (
+         # ssl3+: type(22=handshake) major(=3) minor(any) length_hi
+         $self->{rbuf} =~ /^(?:\z| \x16 (\z| [\x03\x04] (?:\z| . (?:\z| [\x00-\x40] ))))/xs
+         # ssl2 comapatible: len_hi len_lo type(1) major minor dummy(forlength)
+         or $self->{rbuf} =~ /^(?:\z| [\x80-\xff] (?:\z| . (?:\z| \x01 (\z| [\x03\x04] (?:\z| . (?:\z| . ))))))/xs
+      ) {
+         return if 3 != length $1; # partial match, can't decide yet
+
+         # full match, valid TLS record
+         my ($major, $minor) = unpack "CC", $1;
+         $cb->($self, "accept", $major + $minor * 0.1);
+      } else {
+         # mismatch == guaranteed not TLS
+         $cb->($self, undef);
+      }
+
+      1
+   }
+};
+
+register_read_type tls_autostart => sub {
+   my ($self, @tls) = @_;
+
+   $RH{tls_detect}($self, sub {
+      return unless $_[1];
+      $_[0]->starttls (@tls);
+   })
+};
+
 =back
 
 =item custom read types - Package::anyevent_read_type $handle, $cb, @args
@@ -1939,11 +2026,13 @@ sub _dotls {
 
 Instead of starting TLS negotiation immediately when the AnyEvent::Handle
 object is created, you can also do that at a later time by calling
-C<starttls>.
+C<starttls>. See the C<tls> constructor argument for general info.
 
 Starting TLS is currently an asynchronous operation - when you push some
 write data and then call C<< ->starttls >> then TLS negotiation will start
-immediately, after which the queued write data is then sent.
+immediately, after which the queued write data is then sent. This might
+change in future versions, so best make sure you have no outstanding write
+data when calling this method.
 
 The first argument is the same as the C<tls> constructor argument (either
 C<"connect">, C<"accept"> or an existing Net::SSLeay object).
@@ -1975,12 +2064,18 @@ sub starttls {
    Carp::croak "It is an error to call starttls on an AnyEvent::Handle object while TLS is already active, caught"
       if $self->{tls};
 
+   unless (defined $AnyEvent::TLS::VERSION) {
+      eval {
+         require Net::SSLeay;
+         require AnyEvent::TLS;
+         1
+      } or return $self->_error (Errno::EPROTO, 1, "TLS support not available on this system");
+   }
+
    $self->{tls}     = $tls;
    $self->{tls_ctx} = $ctx if @_ > 2;
 
    return unless $self->{fh};
-
-   require Net::SSLeay;
 
    $ERROR_SYSCALL   = Net::SSLeay::ERROR_SYSCALL     ();
    $ERROR_WANT_READ = Net::SSLeay::ERROR_WANT_READ   ();
@@ -1991,8 +2086,6 @@ sub starttls {
    local $Carp::CarpLevel = 1; # skip ourselves when creating a new context or session
 
    if ("HASH" eq ref $ctx) {
-      require AnyEvent::TLS;
-
       if ($ctx->{cache}) {
          my $key = $ctx+0;
          $ctx = $TLS_CACHE{$key} ||= new AnyEvent::TLS %$ctx;
@@ -2235,7 +2328,7 @@ close the connection first (highly desirable for a busy TCP server). A
 client dropping the connection is an error, which means this variant can
 detect an unexpected detection close.
 
-To handle this case, always make sure you have a on-empty read queue, by
+To handle this case, always make sure you have a non-empty read queue, by
 pushing the "read request start" handler on it:
 
    # we assume a request starts with a single line
