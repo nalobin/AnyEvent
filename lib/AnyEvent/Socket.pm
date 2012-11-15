@@ -493,7 +493,7 @@ sub inet_aton {
       if ($ipv4) {
          $cv->begin;
          AnyEvent::DNS::a ($name, sub {
-            $res[$ipv4] = [map &parse_ipv4, @_];
+            $res[$ipv4] = [map { parse_ipv4 $_ } @_];
             $cv->end;
          });
       };
@@ -501,7 +501,7 @@ sub inet_aton {
       if ($ipv6) {
          $cv->begin;
          AnyEvent::DNS::aaaa ($name, sub {
-            $res[$ipv6] = [map &parse_ipv6, @_];
+            $res[$ipv6] = [map { parse_ipv6 $_ } @_];
             $cv->end;
          });
       };
@@ -671,7 +671,7 @@ sub _parse_hosts($) {
    }
 }
 
-# helper function - unless dns delivered results, check and parse hosts, then clal continuation code
+# helper function - unless dns delivered results, check and parse hosts, then call continuation code
 sub _load_hosts_unless(&$@) {
    my ($cont, $cv, @dns) = @_;
 
@@ -796,7 +796,7 @@ sub resolve_sockaddr($$$$$$) {
                   _load_hosts_unless {
                      push @res,
                         map [$idx, "ipv4", [AF_INET , $type, $proton, pack_sockaddr $port, $_]],
-                           @{ $HOSTS{$node}[0] };
+                           @{ $hosts->[0] };
                   } $cv, @_;
                };
             }
@@ -804,6 +804,7 @@ sub resolve_sockaddr($$$$$$) {
             # aaaa records
             if ($family != 4) {
                $cv->begin;
+               next;#d#
                AnyEvent::DNS::aaaa $node, sub {
                   push @res, [$idx, "ipv6", [AF_INET6, $type, $proton, pack_sockaddr $port, parse_ipv6 $_]]
                      for @_;
@@ -811,7 +812,7 @@ sub resolve_sockaddr($$$$$$) {
                   _load_hosts_unless {
                      push @res,
                         map [$idx + 0.5, "ipv6", [AF_INET6, $type, $proton, pack_sockaddr $port, $_]],
-                           @{ $HOSTS{$node}[1] }
+                           @{ $hosts->[1] }
                   } $cv, @_;
                };
             }
@@ -1015,7 +1016,7 @@ sub tcp_connect($$$;$) {
             $state{next}();
          } if $timeout;
 
-         # now connect       
+         # now connect
          if (
             (connect $state{fh}, $sockaddr)
             || ($! == Errno::EINPROGRESS # POSIX
