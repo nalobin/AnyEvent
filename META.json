@@ -4,7 +4,7 @@
       "unknown"
    ],
    "dynamic_config" : 1,
-   "generated_by" : "ExtUtils::MakeMaker version 6.62, CPAN::Meta::Converter version 2.112150",
+   "generated_by" : "ExtUtils::MakeMaker version 6.72, CPAN::Meta::Converter version 2.120630",
    "license" : [
       "unknown"
    ],
@@ -22,12 +22,12 @@
    "prereqs" : {
       "build" : {
          "requires" : {
-            "ExtUtils::MakeMaker" : 0
+            "ExtUtils::MakeMaker" : "0"
          }
       },
       "configure" : {
          "requires" : {
-            "ExtUtils::MakeMaker" : 0
+            "ExtUtils::MakeMaker" : "0"
          }
       },
       "runtime" : {
@@ -38,11 +38,11 @@
             "JSON" : "2.09",
             "JSON::XS" : "2.2",
             "Net::SSLeay" : "1.33",
-            "Task::Weaken" : 0
+            "Task::Weaken" : "0"
          },
          "requires" : {}
       }
    },
    "release_status" : "stable",
-   "version" : "7.04"
+   "version" : "7.05"
 }

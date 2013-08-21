@@ -9,7 +9,7 @@ no warnings 'utf8';
 use Encode;
 use AnyEvent::Util;
 
-open my $fh, "GET http://www.unicode.org/Public/idna/6.1.0/IdnaTest.txt |"
+open my $fh, "GET http://www.unicode.org/Public/idna/6.2.0/IdnaTest.txt |"
    or die;
 
 while (<$fh>) {

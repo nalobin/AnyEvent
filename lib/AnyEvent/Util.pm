@@ -191,7 +191,8 @@ windows, it is abysmally slow, do not expect more than 5..20 forks/s on
 that sucky platform (note this uses perl's pseudo-threads, so avoid those
 like the plague).
 
-Example: poor man's async disk I/O (better use L<IO::AIO>).
+Example: poor man's async disk I/O (better use L<AnyEvent::IO> together
+with L<IO::AIO>).
 
    fork_call {
       open my $fh, "</etc/passwd"
@@ -801,7 +802,7 @@ sub idn_nameprep($;$) {
       # load the mapping data
       unless (defined $uts46_imap) {
          require Unicode::Normalize;
-         require "lib/AnyEvent/Util/uts46data.pl";
+         require "AnyEvent/Util/uts46data.pl";
       }
 
       # uts46 nameprep
@@ -868,7 +869,7 @@ sub idn_nameprep($;$) {
    if (/[^0-9a-z\-.]/) {
       # load the mapping data
       unless (defined $uts46_imap) {
-         require "lib/AnyEvent/Util/uts46data.pl";
+         require "AnyEvent/Util/uts46data.pl";
       }
 
       vec $uts46_valid, ord, 1

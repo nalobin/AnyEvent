@@ -273,7 +273,7 @@ Example 2: fire an event after 0.5 seconds, then roughly every second.
 
    my $w = AnyEvent->timer (after => 0.5, interval => 1, cb => sub {
       warn "timeout\n";
-   };
+   });
 
 =head3 TIMING ISSUES
 
@@ -765,6 +765,10 @@ begun can potentially be zero:
 
    $cv->end;
 
+   ...
+
+   my $results = $cv->recv;
+
 This code fragment supposedly pings a number of hosts and calls
 C<send> after results for all then have have been gathered - in any
 order. To achieve this, the code issues a call to C<begin> when it starts
@@ -809,11 +813,15 @@ In list context, all parameters passed to C<send> will be returned,
 in scalar context only the first one will be returned.
 
 Note that doing a blocking wait in a callback is not supported by any
-event loop, that is, recursive invocation of a blocking C<< ->recv
->> is not allowed, and the C<recv> call will C<croak> if such a
-condition is detected. This condition can be slightly loosened by using
-L<Coro::AnyEvent>, which allows you to do a blocking C<< ->recv >> from
-any thread that doesn't run the event loop itself.
+event loop, that is, recursive invocation of a blocking C<< ->recv >> is
+not allowed and the C<recv> call will C<croak> if such a condition is
+detected. This requirement can be dropped by relying on L<Coro::AnyEvent>
+, which allows you to do a blocking C<< ->recv >> from any thread
+that doesn't run the event loop itself. L<Coro::AnyEvent> is loaded
+automatically when L<Coro> is used with L<AnyEvent>, so code does not need
+to do anything special to take advantage of that: any code that would
+normally block your program because it calls C<recv>, be executed in an
+C<async> thread instead without blocking other threads.
 
 Not all event models support a blocking wait - some die in that case
 (programs might want to do that to stay interactive), so I<if you are
@@ -1141,24 +1149,24 @@ modules of the AnyEvent author himself :)
 
 =over 4
 
-=item L<AnyEvent::Util>
+=item L<AnyEvent::Util> (part of the AnyEvent distribution)
 
 Contains various utility functions that replace often-used blocking
 functions such as C<inet_aton> with event/callback-based versions.
 
-=item L<AnyEvent::Socket>
+=item L<AnyEvent::Socket> (part of the AnyEvent distribution)
 
 Provides various utility functions for (internet protocol) sockets,
 addresses and name resolution. Also functions to create non-blocking tcp
 connections or tcp servers, with IPv6 and SRV record support and more.
 
-=item L<AnyEvent::Handle>
+=item L<AnyEvent::Handle> (part of the AnyEvent distribution)
 
 Provide read and write buffers, manages watchers for reads and writes,
 supports raw and formatted I/O, I/O queued and fully transparent and
 non-blocking SSL/TLS (via L<AnyEvent::TLS>).
 
-=item L<AnyEvent::DNS>
+=item L<AnyEvent::DNS> (part of the AnyEvent distribution)
 
 Provides rich asynchronous DNS resolver capabilities.
 
@@ -1168,7 +1176,7 @@ Implement event-based interfaces to the protocols of the same name (for
 the curious, IGS is the International Go Server and FCP is the Freenet
 Client Protocol).
 
-=item L<AnyEvent::AIO>
+=item L<AnyEvent::AIO> (part of the AnyEvent distribution)
 
 Truly asynchronous (as opposed to non-blocking) I/O, should be in the
 toolbox of every event programmer. AnyEvent::AIO transparently fuses
@@ -1223,20 +1231,14 @@ to simply invert the flow control - don't call us, we will call you:
 
 package AnyEvent;
 
-# basically a tuned-down version of common::sense
-sub common_sense {
-   # from common:.sense 3.5
-   local $^W;
-   ${^WARNING_BITS} ^= ${^WARNING_BITS} ^ "\x3c\x3f\x33\x00\x0f\xf0\x0f\xc0\xf0\xfc\x33\x00";
-   # use strict vars subs - NO UTF-8, as Util.pm doesn't like this atm. (uts46data.pl)
-   $^H |= 0x00000600;
+BEGIN {
+   require "AnyEvent/constants.pl";
+   &AnyEvent::common_sense;
 }
-
-BEGIN { AnyEvent::common_sense }
 
 use Carp ();
 
-our $VERSION = '7.04';
+our $VERSION = '7.05';
 our $MODEL;
 our @ISA;
 our @REGISTRY;
@@ -1245,8 +1247,6 @@ our %PROTOCOL; # (ipv4|ipv6) => (1|2), higher numbers are preferred
 our $MAX_SIGNAL_LATENCY = $ENV{PERL_ANYEVENT_MAX_SIGNAL_LATENCY} || 10; # executes after the BEGIN block below (tainting!)
 
 BEGIN {
-   require "AnyEvent/constants.pl";
-
    eval "sub TAINT (){" . (${^TAINT}*1) . "}";
 
    delete @ENV{grep /^PERL_ANYEVENT_/, keys %ENV}
@@ -2922,6 +2922,16 @@ This module is part of perl since release 5.008. It will be used when the
 chosen event library does not come with a timing source of its own. The
 pure-perl event loop (L<AnyEvent::Loop>) will additionally load it to
 try to use a monotonic clock for timing stability.
+
+=item L<AnyEvent::AIO> (and L<IO::AIO>)
+
+The default implementation of L<AnyEvent::IO> is to do I/O synchronously,
+stopping programs while they access the disk, which is fine for a lot of
+programs.
+
+Installing AnyEvent::AIO (and its IO::AIO dependency) makes it switch to
+a true asynchronous implementation, so event processing can continue even
+while waiting for disk I/O.
 
 =back
 

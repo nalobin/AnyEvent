@@ -662,9 +662,11 @@ sub _parse_hosts($) {
       next unless @aliases;
 
       if (my $ip = parse_ipv4 $addr) {
+         ($ip) = $ip =~ /^(.*)$/s if AnyEvent::TAINT;
          push @{ $HOSTS{$_}[0] }, $ip
             for @aliases;
       } elsif (my $ip = parse_ipv6 $addr) {
+         ($ip) = $ip =~ /^(.*)$/s if AnyEvent::TAINT;
          push @{ $HOSTS{$_}[1] }, $ip
             for @aliases;
       }
@@ -783,20 +785,18 @@ sub resolve_sockaddr($$$$$$) {
          } else {
             $node =~ y/A-Z/a-z/;
 
-            my $hosts = $HOSTS{$node};
-
             # a records
             if ($family != 6) {
                $cv->begin;
                AnyEvent::DNS::a $node, sub {
-                  push @res, [$idx, "ipv4", [AF_INET , $type, $proton, pack_sockaddr $port, parse_ipv4 $_]]
+                  push @res, [$idx, "ipv4", [AF_INET, $type, $proton, pack_sockaddr $port, parse_ipv4 $_]]
                      for @_;
 
                   # dns takes precedence over hosts
                   _load_hosts_unless {
                      push @res,
-                        map [$idx, "ipv4", [AF_INET , $type, $proton, pack_sockaddr $port, $_]],
-                           @{ $hosts->[0] };
+                        map [$idx, "ipv4", [AF_INET, $type, $proton, pack_sockaddr $port, $_]],
+                           @{ ($HOSTS{$node} || [])->[0] };
                   } $cv, @_;
                };
             }
@@ -811,7 +811,7 @@ sub resolve_sockaddr($$$$$$) {
                   _load_hosts_unless {
                      push @res,
                         map [$idx + 0.5, "ipv6", [AF_INET6, $type, $proton, pack_sockaddr $port, $_]],
-                           @{ $hosts->[1] }
+                           @{ ($HOSTS{$node} || [])->[1] }
                   } $cv, @_;
                };
             }
