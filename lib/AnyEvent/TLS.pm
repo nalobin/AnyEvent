@@ -1009,7 +1009,8 @@ sub verify_hostname($$$) {
    my @cert_alt = Net::SSLeay::X509_get_subjectAltNames ($cert);
 
    # rfc2460 - convert to network byte order
-   my $ip = AnyEvent::Socket::parse_address $cn;
+   require AnyEvent::Socket;
+   my $ip = AnyEvent::Socket::parse_address ($cn);
 
    my $alt_dns_count;
 
@@ -1102,7 +1103,7 @@ all...
 You can switch off verification. You still get an encrypted connection
 that is protected against eavesdropping and injection - you just lose
 protection against man in the middle attacks, i.e. somebody else with
-enough abilities to to intercept all traffic can masquerade herself as the
+enough abilities to intercept all traffic can masquerade herself as the
 other side.
 
 For many applications, switching off verification is entirely
@@ -1144,7 +1145,7 @@ on what to watch out for.
 
 =head1 BUGS
 
-To to the abysmal code quality of Net::SSLeay, this module will leak small
+Due to the abysmal code quality of Net::SSLeay, this module will leak small
 amounts of memory per TLS connection (currently at least one perl scalar).
 
 =head1 AUTHORS

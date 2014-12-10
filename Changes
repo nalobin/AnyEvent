@@ -9,6 +9,25 @@ TODO: AnyEvent::Handle with AnyEvent::IO?
 TODO: invalid. and localhost. specialcasing inside AEDNS and not AESocket (rfc6761)
 TODO: maybe implement env variable to give hosts precedence
 
+7.08 Wed Dec 10 05:27:17 CET 2014
+        - work around a newly introduced bug in Socket 2.011 (an
+          errornous sun_length check) (analyzed by Maxime Soulé).
+	- AnyEvent::TLS didn't load (but refer to) AnyEvent::Socket
+          (analyzed by Ben Magistro).
+        - AnyEvent::Strict will now confess, not croak. This is in line with
+          it being a development/debugging tool.
+        - work around a number of libglib bugs (debug builds of libglib enforce
+          certain undocumented behaviour patterns such as not being able to
+          remove a child watch source after it has fired, which we will try
+          to emulate to avoid "criticals". what where they thinking...).
+        - mention json security issues in AnyEvent::Handle, now that Douglas
+          Crockford has foolishly and incompatibly changed JSON.
+        - changed default dns resolver "max_outstanding" value from 1 to 10,
+          the latter beinfg the intended value all along
+          (reported by Ilya Chesnokov).
+        - added new "AnyEvent::Impl::UV" interface module to the UV event lib
+          (written by Mike Lowell).
+
 7.07 Tue Dec 17 17:45:02 CET 2013
 	- the documentation for custom tls verify schemes was wrong. make it agree
           with the code (reported by Maxime Soulé).
@@ -630,7 +649,7 @@ TODO: maybe implement env variable to give hosts precedence
         - add an additional error message parameter to AnyEvent::Handle's
           on_error callback (for TLS, $! is still available).
         - add AnyEvent::Handle on_starttls/on_stoptls callbacks.
-        - make AnyEvent::Handle more robust against early conenction
+        - make AnyEvent::Handle more robust against early connection
           failures (during new), and return C<undef> in that case
           from the constructor.
         - AnyEvent::Handle will now try to load only JSON::XS first,

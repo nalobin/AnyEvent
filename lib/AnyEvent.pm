@@ -2,8 +2,8 @@
 
 AnyEvent - the DBI of event loop programming
 
-EV, Event, Glib, Tk, Perl, Event::Lib, Irssi, rxvt-unicode, IO::Async, Qt,
-FLTK and POE are various supported event loops/environments.
+EV, Event, Glib, Tk, UV, Perl, Event::Lib, Irssi, rxvt-unicode, IO::Async,
+Qt, FLTK and POE are various supported event loops/environments.
 
 =head1 SYNOPSIS
 
@@ -885,6 +885,7 @@ create watchers. Nothing special needs to be done by the main program.
    AnyEvent::Impl::Event     based on Event, very stable, few glitches.
    AnyEvent::Impl::Glib      based on Glib, slow but very stable.
    AnyEvent::Impl::Tk        based on Tk, very broken.
+   AnyEvent::Impl::UV        based on UV, innovated square wheels.
    AnyEvent::Impl::EventLib  based on Event::Lib, leaks memory and worse.
    AnyEvent::Impl::POE       based on POE, very slow, some limitations.
    AnyEvent::Impl::Irssi     used when running within irssi.
@@ -1035,7 +1036,7 @@ asynchronously does something for you and returns some transaction
 object or guard to let you cancel the operation. For example,
 C<AnyEvent::Socket::tcp_connect>:
 
-   # start a conenction attempt unless one is active
+   # start a connection attempt unless one is active
    $self->{connect_guard} ||= AnyEvent::Socket::tcp_connect "www.example.net", 80, sub {
       delete $self->{connect_guard};
       ...
@@ -1249,7 +1250,7 @@ BEGIN {
 
 use Carp ();
 
-our $VERSION = '7.07';
+our $VERSION = '7.08';
 our $MODEL;
 our @ISA;
 our @REGISTRY;
@@ -1368,6 +1369,7 @@ our @models = (
    # everything below here should not be autoloaded
    [Event::Lib::           => AnyEvent::Impl::EventLib::], # too buggy
    [Tk::                   => AnyEvent::Impl::Tk::],       # crashes with many handles
+   [UV::                   => AnyEvent::Impl::UV::],       # switched from libev, added back all bugs imaginable
    [Qt::                   => AnyEvent::Impl::Qt::],       # requires special main program
    [POE::Kernel::          => AnyEvent::Impl::POE::],      # lasciate ogni speranza
    [Wx::                   => AnyEvent::Impl::POE::],
@@ -1566,7 +1568,7 @@ package AE;
 our $VERSION = $AnyEvent::VERSION;
 
 sub _reset() {
-   eval q{ 
+   eval q{
       # fall back to the main API by default - backends and AnyEvent::Base
       # implementations can overwrite these.
 
@@ -2212,7 +2214,7 @@ list.
 
 This variable can effectively be used for denial-of-service attacks
 against local programs (e.g. when setuid), although the impact is likely
-small, as the program has to handle conenction and other failures anyways.
+small, as the program has to handle connection and other failures anyways.
 
 Examples: C<PERL_ANYEVENT_PROTOCOLS=ipv4,ipv6> - prefer IPv4 over IPv6,
 but support both and try to use both.  C<PERL_ANYEVENT_PROTOCOLS=ipv4>

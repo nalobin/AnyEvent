@@ -578,8 +578,14 @@ module (C<format_address> converts it to C<unix/>).
 # perl contains a bug (imho) where it requires that the kernel always returns
 # sockaddr_un structures of maximum length (which is not, AFAICS, required
 # by any standard). try to 0-pad structures for the benefit of those platforms.
+# unfortunately, the IO::Async author chose to break Socket again in version
+# 2.011 - it now contains a bogus length check, so we disable the workaround.
 
-my $sa_un_zero = eval { Socket::pack_sockaddr_un "" }; $sa_un_zero ^= $sa_un_zero;
+my $sa_un_zero = $Socket::VERSION >= 2.011
+   ? ""
+   : eval { Socket::pack_sockaddr_un "" };
+
+$sa_un_zero ^= $sa_un_zero;
 
 sub unpack_sockaddr($) {
    my $af = sockaddr_family $_[0];
@@ -595,7 +601,7 @@ sub unpack_sockaddr($) {
    }
 }
 
-=item resolve_sockaddr $node, $service, $proto, $family, $type, $cb->([$family, $type, $proto, $sockaddr], ...)
+=item AnyEvent::Socket::resolve_sockaddr $node, $service, $proto, $family, $type, $cb->([$family, $type, $proto, $sockaddr], ...)
 
 Tries to resolve the given nodename and service name into protocol families
 and sockaddr structures usable to connect to this node and service in a
@@ -903,9 +909,6 @@ a second callback, C<$prepare_cb>. It will be called with the file handle
 in not-yet-connected state as only argument and must return the connection
 timeout value (or C<0>, C<undef> or the empty list to indicate the default
 timeout is to be used).
-
-Note that the socket could be either a IPv4 TCP socket or an IPv6 TCP
-socket (although only IPv4 is currently supported by this module).
 
 Note to the poor Microsoft Windows users: Windows (of course) doesn't
 correctly signal connection errors, so unless your event library works
