@@ -686,6 +686,9 @@ sub new {
    $self->{debug} = $arg{debug}
       if exists $arg{debug};
 
+   $self->{host_name} = $arg{host_name}
+      if exists $arg{host_name};
+
    my $pw = $arg{cert_password};
    Net::SSLeay::CTX_set_default_passwd_cb ($ctx, ref $pw ? $pw : sub { $pw });
 
@@ -842,7 +845,12 @@ sub _get_session($$;$$) {
 
    } elsif ($mode eq "connect") {
       $session = Net::SSLeay::new ($self->{ctx});
-      Net::SSLeay::set_connect_state ($session);
+
+      if ($self->{host_name}) {
+         Net::SSLeay::set_tlsext_host_name( $session, $self->{host_name} );
+      }
+
+      Net::SSLeay::set_connect_state($session);
 
       Net::SSLeay::set_options ($session, eval { Net::SSLeay::OP_NO_TICKET () })
          unless $self->{session_ticket};
